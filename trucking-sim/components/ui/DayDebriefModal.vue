@@ -52,6 +52,16 @@
           <span class="text-[11px]" style="color: #64748b;">Fuel Cost</span>
           <span class="text-[11px] font-semibold tabular-nums" style="color: #dc2626;">−${{ (result?.fuel_cost ?? 0).toLocaleString() }}</span>
         </div>
+        <div v-if="dailyWages > 0" class="flex items-center justify-between">
+          <span class="text-[11px]" style="color: #64748b;">Driver Wages</span>
+          <span class="text-[11px] font-semibold tabular-nums" style="color: #dc2626;">−${{ dailyWages.toLocaleString() }}</span>
+        </div>
+        <div class="flex items-center justify-between pt-1 mt-0.5" style="border-top: 1px solid rgba(226,232,240,0.5);">
+          <span class="text-[11px] font-bold" style="color: #0f172a;">Net After Wages</span>
+          <span class="text-[11px] font-black tabular-nums" :style="netAfterWages >= 0 ? 'color: #059669;' : 'color: #dc2626;'">
+            {{ netAfterWages >= 0 ? '+' : '' }}${{ Math.abs(netAfterWages).toLocaleString() }}
+          </span>
+        </div>
       </div>
     </div>
 
@@ -79,6 +89,36 @@
       <div class="text-center">
         <p class="text-lg font-black tabular-nums" style="color: #2563eb;">30m</p>
         <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: #64748b;">Dwell/Relay</p>
+      </div>
+    </div>
+
+    <!-- Per-truck breakdown (only when multiple trucks ran) -->
+    <div v-if="truckSummaries.length > 1" class="rounded-xl overflow-hidden" style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);">
+      <p class="text-[10px] font-bold uppercase tracking-widest px-4 py-2.5" style="color: #64748b; border-bottom: 1px solid rgba(226,232,240,0.8);">Fleet Results</p>
+      <div v-for="t in truckSummaries" :key="t.truckId" class="flex items-center justify-between px-4 py-2.5" style="border-bottom: 1px solid rgba(226,232,240,0.6);">
+        <div>
+          <p class="text-[11px] font-bold" style="color: #0f172a;">{{ t.truckName }}</p>
+          <p class="text-[10px]" style="color: #94a3b8;">{{ t.delivered }}/{{ t.attempted }} stops · {{ t.driverName }}</p>
+        </div>
+        <span class="text-[11px] font-black tabular-nums" :style="t.revenue > 0 ? 'color: #059669;' : 'color: #94a3b8;'">${{ t.revenue.toLocaleString() }}</span>
+      </div>
+    </div>
+
+    <!-- Brand SLA progress (only when contracts are active) -->
+    <div v-if="brandStore.activeContracts.length > 0" class="rounded-xl overflow-hidden" style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);">
+      <p class="text-[10px] font-bold uppercase tracking-widest px-4 py-2.5" style="color: #64748b; border-bottom: 1px solid rgba(226,232,240,0.8);">Brand SLA</p>
+      <div v-for="c in brandStore.activeContracts" :key="c.id" class="px-4 py-3" style="border-bottom: 1px solid rgba(226,232,240,0.6);">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[11px] font-bold" style="color: #0f172a;">{{ c.brand_name }}</span>
+          <span class="text-[11px] font-black tabular-nums" :style="c.weekly_volume_delivered >= c.weekly_volume_target ? 'color: #059669;' : 'color: #64748b;'">
+            {{ c.weekly_volume_delivered }}/{{ c.weekly_volume_target }}
+          </span>
+        </div>
+        <div class="h-1.5 rounded-full overflow-hidden" style="background: rgba(226,232,240,0.8);">
+          <div class="h-full rounded-full transition-all" :style="{ width: `${Math.min(100, (c.weekly_volume_delivered / c.weekly_volume_target) * 100)}%`, background: c.weekly_volume_delivered >= c.weekly_volume_target ? '#059669' : '#3b82f6' }" />
+        </div>
+        <p v-if="c.weekly_volume_delivered >= c.weekly_volume_target" class="text-[10px] mt-1 font-semibold" style="color: #059669;">✓ SLA met — ${{ c.weekly_retainer.toLocaleString() }} bonus on day {{ c.week_start_day + 5 }}</p>
+        <p v-else class="text-[10px] mt-1" style="color: #94a3b8;">{{ c.weekly_volume_target - c.weekly_volume_delivered }} pkgs to go · Day {{ Math.min(5, gameStore.company.current_day - c.week_start_day + 1) }} of 5</p>
       </div>
     </div>
 
@@ -159,7 +199,7 @@
       </p>
       <div class="flex flex-col divide-y" style="--tw-divide-opacity:1; divide-color: rgba(226,232,240,0.8);">
         <div
-          v-for="(stop, idx) in dayStore.manifest.filter(s => s.stop_type !== 'terminal_return')"
+          v-for="(stop, idx) in allStops"
           :key="stop.job.id"
           class="flex items-center gap-3 px-4 py-3"
         >
@@ -205,7 +245,7 @@
         </div>
 
         <!-- Empty state -->
-        <div v-if="dayStore.manifest.filter(s => s.stop_type !== 'terminal_return').length === 0" class="px-4 py-6 text-center">
+        <div v-if="allStops.length === 0" class="px-4 py-6 text-center">
           <p class="text-xs" style="color: #94a3b8;">No stops were planned for this day.</p>
         </div>
       </div>
@@ -247,6 +287,8 @@
 import { computed } from 'vue'
 import { useDayStore } from '~/stores/useDayStore'
 import { useGameStore } from '~/stores/useGameStore'
+import { useFleetStore } from '~/stores/useFleetStore'
+import { useBrandContractStore } from '~/stores/useBrandContractStore'
 import type { ManifestStop } from '~/types/game'
 
 const emit = defineEmits<{
@@ -256,6 +298,8 @@ const emit = defineEmits<{
 
 const dayStore = useDayStore()
 const gameStore = useGameStore()
+const fleetStore = useFleetStore()
+const brandStore = useBrandContractStore()
 
 const result = computed(() => dayStore.day_result)
 
@@ -287,6 +331,10 @@ function densityHint(score: number): string {
 
 // ─── Computed data ─────────────────────────────────────────────────────────
 
+const dailyWages = computed(() =>
+  fleetStore.drivers.filter(d => !d.is_owner_op && d.daily_wage > 0).reduce((s, d) => s + d.daily_wage, 0)
+)
+
 const netRevenue = computed(() => {
   if (!result.value) return 0
   return result.value.revenue - result.value.late_penalties
@@ -295,6 +343,33 @@ const netRevenue = computed(() => {
 const netShift = computed(() => {
   if (!result.value) return 0
   return result.value.revenue - result.value.late_penalties - result.value.fuel_cost
+})
+
+const netAfterWages = computed(() => netShift.value - dailyWages.value)
+
+// All stops across every truck's route (for stop log in multi-truck mode)
+const allStops = computed((): ManifestStop[] => {
+  const routes = Object.values(dayStore.fleet_routes)
+  if (routes.length === 0) return dayStore.manifest.filter(s => s.stop_type !== 'terminal_return')
+  return routes.flatMap(r => r.manifest.filter(s => s.stop_type !== 'terminal_return'))
+})
+
+// Per-truck results for the fleet summary row
+const truckSummaries = computed(() => {
+  return Object.entries(dayStore.fleet_routes).map(([truckId, route]) => {
+    const truck = fleetStore.getTruckById(truckId)
+    const driver = route.driver_id ? fleetStore.getDriverById(route.driver_id) : null
+    const real = route.manifest.filter(s => s.stop_type !== 'terminal_return')
+    const delivered = real.filter(s => s.job.status === 'delivered')
+    return {
+      truckId,
+      truckName: truck?.name ?? truckId,
+      driverName: driver?.name ?? 'No driver',
+      attempted: real.length,
+      delivered: delivered.length,
+      revenue: delivered.reduce((sum, s) => sum + s.job.payout, 0),
+    }
+  })
 })
 
 const stopsPerWaveLabel = computed(() => {
