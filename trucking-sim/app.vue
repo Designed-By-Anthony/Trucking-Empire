@@ -70,8 +70,9 @@
       </Transition>
     </Teleport>
 
-    <!-- FTUE onboarding wizard — shown until wizard is dismissed (step > 3) -->
-    <OnboardingWizard v-if="!gameStore.has_completed_onboarding && gameStore.onboarding_step <= 3" />
+    <!-- FTUE onboarding wizard — shown when player has no truck yet.
+         Pinia resets on every load so this is iOS-snapshot-proof. -->
+    <OnboardingWizard v-if="fleetStore.fleet.length === 0 || gameStore.onboarding_step <= 3" />
 
     <!-- Mid-day dispatch event interrupt (manages its own Teleport) -->
     <DispatchEventModal />
