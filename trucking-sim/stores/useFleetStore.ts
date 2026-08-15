@@ -197,6 +197,38 @@ export const useFleetStore = defineStore('fleet', {
       }
     },
 
+    // ── Phantom Route Guard ───────────────────────────────────────────────────
+    // Called after hydrating saved state. If a truck is stuck in a driving/loading
+    // status but no day route is actively running, it's orphaned — reset it.
+    validatePhantomRoutes(dayPhase: string) {
+      if (dayPhase === 'in_progress') return
+      for (const truck of this.fleet) {
+        if (truck.status === 'EN_ROUTE' || truck.status === 'LOADING') {
+          truck.status = 'Idle'
+          truck.driver_id = null
+        }
+      }
+      for (const driver of this.drivers) {
+        if (driver.status === 'Driving') {
+          driver.status = 'Available'
+          driver.assigned_truck_id = null
+        }
+      }
+    },
+
+    // Manual unstick for a specific truck — callable from Fleet modal UI
+    unstickTruck(truckId: string) {
+      const truck = this.fleet.find(t => t.id === truckId)
+      if (!truck) return
+      truck.status = 'Idle'
+      truck.driver_id = null
+      const driver = this.drivers.find(d => d.assigned_truck_id === truckId)
+      if (driver) {
+        driver.status = 'Available'
+        driver.assigned_truck_id = null
+      }
+    },
+
     addTruck(truck: Truck) {
       this.fleet.push(truck)
     },

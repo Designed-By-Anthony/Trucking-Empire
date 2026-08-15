@@ -90,7 +90,7 @@
     <!-- Dev reset — wipes all state and restarts onboarding -->
     <div class="mt-2 pt-4" style="border-top: 1px solid rgba(226,232,240,0.6);">
       <button
-        @click="gameStore.resetGameToInitialState()"
+        @click="gameStore.nukeAndResetGame()"
         class="w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95"
         style="background: rgba(254,242,242,0.8); color: #dc2626; border: 1px solid rgba(252,165,165,0.4);"
       >

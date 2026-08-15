@@ -37,7 +37,7 @@
     </div>
 
     <!-- Time + active trucks -->
-    <div class="flex-1 flex flex-col items-end gap-0.5 min-w-0">
+    <div class="flex flex-col items-end gap-0.5 min-w-0">
       <span class="text-xs font-semibold tabular-nums" style="color: #0f172a;">{{ gameStore.formattedTime }}</span>
       <div class="flex items-center gap-1">
         <span
@@ -50,6 +50,23 @@
         </span>
       </div>
     </div>
+
+    <!-- Nuke & Restart — long-press or double-tap to reveal confirm -->
+    <button
+      @click="handleNukeClick"
+      class="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-colors"
+      :style="nukeArmed
+        ? 'background: #dc2626; color: white;'
+        : 'background: rgba(0,0,0,0.05); color: #cbd5e1;'"
+      :title="nukeArmed ? 'Tap again to wipe all data and restart' : 'Hold to reset'"
+    >
+      <svg v-if="!nukeArmed" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14M12 2v2M12 20v2M2 12h2M20 12h2"/>
+      </svg>
+      <svg v-else class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+      </svg>
+    </button>
   </div>
 </template>
 
@@ -71,4 +88,19 @@ const speeds: { value: ClockSpeed; label: string }[] = [
 const cashColor = computed(() =>
   gameStore.company.cash < 0 ? '#dc2626' : '#059669'
 )
+
+// Two-tap nuke guard: first tap arms it (turns red), second tap within 3s fires it.
+const nukeArmed = ref(false)
+let nukeTimer: ReturnType<typeof setTimeout> | null = null
+
+function handleNukeClick() {
+  if (!nukeArmed.value) {
+    nukeArmed.value = true
+    nukeTimer = setTimeout(() => { nukeArmed.value = false }, 3000)
+  } else {
+    if (nukeTimer) clearTimeout(nukeTimer)
+    nukeArmed.value = false
+    gameStore.nukeAndResetGame()
+  }
+}
 </script>

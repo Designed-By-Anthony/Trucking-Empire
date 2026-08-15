@@ -115,16 +115,41 @@ export const useGameStore = defineStore('game', {
       this.company.date_tick = this.company.current_day * 24 + 6
     },
 
-    resetGameToInitialState() {
+    async nukeAndResetGame() {
       this.pause()
+
+      // Save pid BEFORE wiping so we can delete the KV record
       const pid = typeof localStorage !== 'undefined' ? localStorage.getItem('fe:pid') : null
-      // Set reset flag BEFORE clearing — sessionStorage survives location.reload()
-      // so the persist plugin sees it on the next load and skips hydration.
-      if (typeof sessionStorage !== 'undefined') sessionStorage.setItem('fe:reset', '1')
+
+      // Signal to persist plugin: skip hydration on next load
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem('fe:reset', '1')
+      }
+
+      // Wipe ALL localStorage (fe:state, fte_done, fe:pid — everything)
       if (typeof localStorage !== 'undefined') localStorage.clear()
-      // Delete KV state so the old save can't be loaded by a future session.
+
+      // Wipe all service worker caches so stale app shell doesn't survive the restart
+      if (typeof caches !== 'undefined') {
+        try {
+          const keys = await caches.keys()
+          await Promise.all(keys.map(k => caches.delete(k)))
+        } catch {}
+      }
+
+      // Delete KV state server-side (fire-and-forget — new pid on next load handles stale reads)
       if (pid) fetch(`/api/state?id=${encodeURIComponent(pid)}`, { method: 'DELETE' }).catch(() => {})
-      if (typeof window !== 'undefined') window.location.reload()
+
+      // Navigate instead of reload — defeats iOS PWA snapshot restoration that
+      // can bring back the old localStorage state even after localStorage.clear()
+      if (typeof window !== 'undefined') {
+        window.location.href = window.location.origin
+      }
+    },
+
+    // Keep as alias for any callers that haven't been updated yet
+    resetGameToInitialState() {
+      return this.nukeAndResetGame()
     },
   },
 })

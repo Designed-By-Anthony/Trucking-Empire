@@ -1,6 +1,7 @@
 import { useGameStore } from '~/stores/useGameStore'
 import { useFleetStore } from '~/stores/useFleetStore'
 import { useContractStore } from '~/stores/useContractStore'
+import { useDayStore } from '~/stores/useDayStore'
 
 const PID_KEY = 'fe:pid'
 const LS_KEY = 'fe:state'
@@ -77,6 +78,7 @@ export default defineNuxtPlugin(async () => {
   const game = useGameStore()
   const fleet = useFleetStore()
   const contracts = useContractStore()
+  const day = useDayStore()
 
   // If a reset was requested, skip hydration entirely so stores start clean.
   // sessionStorage survives location.reload() within the same tab, making it
@@ -96,6 +98,11 @@ export default defineNuxtPlugin(async () => {
     if (saved.fleet) fleet.$patch(saved.fleet)
     if (saved.contracts) contracts.$patch(saved.contracts)
   }
+
+  // After restoring fleet state, clear any phantom truck statuses. A truck left
+  // in EN_ROUTE/LOADING with no active day route is orphaned — reset it to Idle
+  // so the morning board can see it as available.
+  fleet.validatePhantomRoutes(day.phase)
 
   wireSubscriptions(pid, game, fleet, contracts)
 })
