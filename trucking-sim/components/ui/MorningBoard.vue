@@ -55,9 +55,16 @@
           : 'color: #64748b;'"
       >
         <span class="truncate max-w-full">{{ tab.truck?.name ?? tab.id }}</span>
-        <span :style="selectedTruckId === tab.id ? 'color: rgba(255,255,255,0.75);' : 'color: #94a3b8;'" style="font-weight: 600;">
-          {{ tab.stopCount }} stop{{ tab.stopCount !== 1 ? 's' : '' }}
-        </span>
+        <div class="flex items-center gap-1">
+          <span :style="selectedTruckId === tab.id ? 'color: rgba(255,255,255,0.75);' : 'color: #94a3b8;'" style="font-weight: 600;">
+            {{ tab.stopCount }} stop{{ tab.stopCount !== 1 ? 's' : '' }}
+          </span>
+          <!-- Ready indicator dot when driver is assigned + has stops -->
+          <span v-if="tab.stopCount > 0 && dayStore.fleet_routes[tab.id]?.driver_id"
+            class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+            :style="selectedTruckId === tab.id ? 'background: rgba(255,255,255,0.9);' : 'background: #059669;'"
+          ></span>
+        </div>
       </button>
     </div>
 
@@ -483,15 +490,28 @@
       </div>
     </div>
 
-    <!-- Lock in Route CTA -->
+    <!-- Dispatch All Routes CTA — shown when 2+ trucks are ready -->
+    <button
+      v-if="canLaunchAll"
+      @click="launchAllRoutes"
+      class="w-full rounded-xl py-3.5 text-sm font-black transition-all duration-200 active:scale-95"
+      style="background: linear-gradient(135deg, #059669, #2563eb); color: white; border: none;"
+    >
+      Dispatch All {{ readyRoutes.length }} Routes
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="display: inline; margin-left: 4px; vertical-align: middle;">
+        <path d="M2 6h8M7 3l3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+
+    <!-- Lock in Route CTA — single truck -->
     <button
       @click="lockInRoute"
       :disabled="!canLock"
       class="w-full rounded-xl py-3.5 text-sm font-black transition-all duration-200"
-      :style="lockBtnStyle"
+      :style="canLaunchAll ? 'background: rgba(241,245,249,0.9); color: #64748b; border: 1px solid rgba(226,232,240,0.8);' : lockBtnStyle"
     >
       <template v-if="canLock">
-        Lock in Route
+        {{ canLaunchAll ? 'Launch Selected Only' : 'Lock in Route' }}
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="display: inline; margin-left: 4px; vertical-align: middle;">
           <path d="M2 6h8M7 3l3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
@@ -524,6 +544,7 @@ const { planRoute } = useRoutePlanner()
 // ─── Emits ────────────────────────────────────────────────────────────────────
 const emit = defineEmits<{
   (e: 'start-day', payload: { truckId: string; driverId: string }): void
+  (e: 'launch-all', payload: { routes: { truckId: string; driverId: string }[] }): void
 }>()
 
 // ─── Local state ─────────────────────────────────────────────────────────────
@@ -692,9 +713,28 @@ function buySupplementFreight() {
   }
 }
 
+// Routes that have at least 1 stop AND a driver assigned — ready to go
+const readyRoutes = computed(() =>
+  dayStore.configured_truck_ids
+    .map(id => ({ truckId: id, route: dayStore.fleet_routes[id] }))
+    .filter(({ route }) =>
+      route &&
+      route.manifest.filter(s => s.stop_type !== 'terminal_return').length > 0 &&
+      !!route.driver_id
+    )
+    .map(({ truckId, route }) => ({ truckId, driverId: route!.driver_id! }))
+)
+
+const canLaunchAll = computed(() => readyRoutes.value.length > 1)
+
 function lockInRoute() {
   if (!canLock.value) return
   emit('start-day', { truckId: selectedTruckId.value, driverId: selectedDriverId.value })
+}
+
+function launchAllRoutes() {
+  if (!canLaunchAll.value) return
+  emit('launch-all', { routes: readyRoutes.value })
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

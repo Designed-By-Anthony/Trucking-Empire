@@ -151,12 +151,15 @@ export const useMap = () => {
       dayRoutePolyline = null
     }
 
-    if (!manifest.length || phase === 'debrief') return
+    const realStops = manifest.filter(s => s.stop_type !== 'terminal_return')
+    if (!realStops.length || phase === 'debrief') return
 
-    // Draw route polyline: base → each stop in sequence order
+    // Draw route polyline: base → each real stop in sequence order
     const coords: [number, number][] = [
       [43.1009, -75.2327],
-      ...manifest.map(s => [s.job.delivery_lat, s.job.delivery_lng] as [number, number]),
+      ...realStops
+        .map(s => [s.job.delivery_lat, s.job.delivery_lng] as [number, number])
+        .filter(([lat, lng]) => !isNaN(lat) && !isNaN(lng) && lat !== 0),
     ]
     dayRoutePolyline = L.polyline(coords, {
       color: '#2563eb',

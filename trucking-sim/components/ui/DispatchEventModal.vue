@@ -57,12 +57,37 @@
             </div>
           </div>
 
+          <!-- ── Fleet Truck Picker (shown when 2+ trucks are active) ── -->
+          <div v-if="fleetFeasibility.length > 1" class="rounded-xl overflow-hidden mb-4" style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);">
+            <p class="text-[11px] font-bold uppercase tracking-widest px-4 py-2.5" style="color: #64748b; border-bottom: 1px solid rgba(226,232,240,0.8);">Assign to Truck</p>
+            <div v-for="t in fleetFeasibility" :key="t.truckId"
+              @click="t.canAdd && (routeTargetId = t.truckId)"
+              class="flex items-center justify-between px-4 py-3 transition-all"
+              :style="[
+                t.truckId === routeTargetId ? 'background: rgba(219,234,254,0.7);' : '',
+                t.canAdd ? 'cursor: pointer;' : 'opacity: 0.5;',
+                'border-bottom: 1px solid rgba(226,232,240,0.6);',
+              ].join(' ')"
+            >
+              <div>
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[11px] font-bold" style="color: #0f172a;">{{ t.truckName }}</span>
+                  <span v-if="t.truckId === routeTargetId" class="text-[9px] font-black rounded px-1 py-0.5" style="background: #2563eb; color: white;">SELECTED</span>
+                </div>
+                <p class="text-[10px] mt-0.5" style="color: #94a3b8;">{{ t.driverName }} · {{ t.remainingStops }} stops left · free ~{{ fmtHour(t.lastFreeHour) }}</p>
+              </div>
+              <span class="text-[10px] font-bold px-2 py-1 rounded-lg flex-shrink-0"
+                :style="t.canAdd ? 'background: rgba(240,253,244,0.9); color: #059669;' : 'background: rgba(254,242,242,0.9); color: #dc2626;'"
+              >{{ t.canAdd ? '✓ Eligible' : '✗ Blocked' }}</span>
+            </div>
+          </div>
+
           <!-- ── Route Check (HOS + window, not capacity) ── -->
           <div
             class="rounded-xl p-4 mb-4"
             style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);"
           >
-            <p class="text-[11px] font-bold uppercase tracking-wider mb-3" style="color: #64748b;">Route Check</p>
+            <p class="text-[11px] font-bold uppercase tracking-wider mb-3" style="color: #64748b;">Route Check{{ fleetFeasibility.length > 1 ? ` · ${targetFeasibility?.truckName}` : '' }}</p>
 
             <!-- HOS row -->
             <div class="flex items-center justify-between py-2" style="border-bottom: 1px solid rgba(226,232,240,0.7);">
@@ -99,7 +124,7 @@
 
           <!-- Context note about how the pickup works -->
           <p class="text-[11px] mb-4" style="color: #94a3b8;">
-            <span style="color: #0f172a; font-weight: 600;">{{ remainingStops.length }} stop{{ remainingStops.length !== 1 ? 's' : '' }} remaining.</span>
+            <span style="color: #0f172a; font-weight: 600;">{{ remainingStops }} stop{{ remainingStops !== 1 ? 's' : '' }} remaining.</span>
             Van clears first — pickup loads after final delivery.
           </p>
 
@@ -135,7 +160,7 @@
             class="w-full text-sm font-bold text-white rounded-xl py-3.5 transition-all active:scale-95"
             style="background: #059669; box-shadow: 0 4px 16px rgba(5,150,105,0.35);"
           >
-            Add to Route  +${{ ev.job.payout }}
+            Add to {{ fleetFeasibility.length > 1 ? (targetFeasibility?.truckName ?? 'Route') : 'Route' }}  +${{ ev.job.payout }}
           </button>
 
           <!-- Secondary: Schedule for tomorrow — always available -->
@@ -164,7 +189,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useDayStore } from '~/stores/useDayStore'
 import { useFleetStore } from '~/stores/useFleetStore'
 import { useGameStore } from '~/stores/useGameStore'
@@ -175,77 +200,94 @@ const fleetStore = useFleetStore()
 const gameStore = useGameStore()
 
 const ev = computed(() => dayStore.active_event)
+const PICKUP_SERVICE_H = 0.5
 
-// ─── Remaining route analysis ─────────────────────────────────────────────
+// ─── Fleet feasibility — evaluate every active route ─────────────────────
 
-const remainingStops = computed(() =>
-  dayStore.manifest
-    .slice(dayStore.current_stop_index)
-    .filter(s => s.job.status !== 'delivered')
-)
+interface TruckFeasibility {
+  truckId: string
+  truckName: string
+  driverName: string
+  remainingStops: number
+  hosOk: boolean
+  windowOk: boolean
+  spaceOk: boolean
+  canAdd: boolean
+  hosAvailable: number
+  timeNeeded: number
+  lastFreeHour: number
+}
 
-// Game tick when the last remaining stop will be fully completed
-const lastStopDoneTick = computed(() => {
-  const last = remainingStops.value[remainingStops.value.length - 1]
-  if (!last) return gameStore.company.date_tick
-  return last.eta_game_hour + serviceHoursForJob(last.job)
-})
-
-// As a clock hour (0-23) for display
-const lastStopDoneHour = computed(() => lastStopDoneTick.value % 24)
-
-// Hours from now until route completes
-const timeToFinishRoute = computed(() =>
-  Math.max(0, lastStopDoneTick.value - gameStore.company.date_tick)
-)
-
-// ─── HOS check ────────────────────────────────────────────────────────────
-
-const PICKUP_SERVICE_H = 0.5   // estimated time at pickup location
-
-const totalTimeNeeded = computed(() => timeToFinishRoute.value + PICKUP_SERVICE_H)
-
-const driver = computed(() =>
-  fleetStore.drivers.find(d => d.id === dayStore.driver_id)
-)
-
-const hosAvailable = computed(() => driver.value?.hos_drive_remaining ?? 11)
-
-const hosOk = computed(() => hosAvailable.value >= totalTimeNeeded.value)
-
-// ─── Window check ─────────────────────────────────────────────────────────
-
-// Pickup window_close is a clock hour (0-23); convert to absolute tick
+const dayBase = computed(() => Math.floor(gameStore.company.date_tick / 24) * 24)
 const pickupWindowCloseTick = computed(() => {
   if (!ev.value) return 0
-  const dayBase = Math.floor(gameStore.company.date_tick / 24) * 24
-  return dayBase + ev.value.job.window_close
+  return dayBase.value + ev.value.job.window_close
 })
 
-const canMakeWindow = computed(() =>
-  lastStopDoneTick.value <= pickupWindowCloseTick.value
+const fleetFeasibility = computed((): TruckFeasibility[] => {
+  if (!ev.value) return []
+  return Object.entries(dayStore.fleet_routes)
+    .filter(([, route]) => route.route_phase === 'in_progress')
+    .map(([truckId, route]) => {
+      const truck = fleetStore.getTruckById(truckId)
+      const driver = route.driver_id ? fleetStore.getDriverById(route.driver_id) : null
+      const remaining = route.manifest.slice(route.current_stop_index).filter(s => s.job.status !== 'delivered')
+      const lastStop = remaining[remaining.length - 1]
+      const lastDoneTick = lastStop ? lastStop.eta_game_hour + serviceHoursForJob(lastStop.job) : gameStore.company.date_tick
+      const timeToFinish = Math.max(0, lastDoneTick - gameStore.company.date_tick)
+      const timeNeeded = timeToFinish + PICKUP_SERVICE_H
+      const hosAvailable = driver?.hos_drive_remaining ?? 11
+      const hosOk = hosAvailable >= timeNeeded
+      const windowOk = lastDoneTick <= pickupWindowCloseTick.value
+      const spaceOk = ev.value!.job.weight_lbs <= (truck?.max_weight_lbs ?? 99999) && ev.value!.job.volume_ft3 <= (truck?.volume_ft3 ?? 99999)
+      return {
+        truckId,
+        truckName: truck?.name ?? truckId,
+        driverName: driver?.name ?? 'No driver',
+        remainingStops: remaining.length,
+        hosOk,
+        windowOk,
+        spaceOk,
+        canAdd: hosOk && windowOk && spaceOk,
+        hosAvailable,
+        timeNeeded,
+        lastFreeHour: lastDoneTick % 24,
+      }
+    })
+})
+
+const eligibleTrucks = computed(() => fleetFeasibility.value.filter(t => t.canAdd))
+const ineligibleTrucks = computed(() => fleetFeasibility.value.filter(t => !t.canAdd))
+
+// Selected route target — auto-set to first eligible truck, or current selected
+const routeTargetId = ref('')
+watch([fleetFeasibility, () => dayStore.selected_truck_id], () => {
+  if (eligibleTrucks.value.length > 0 && !eligibleTrucks.value.find(t => t.truckId === routeTargetId.value)) {
+    routeTargetId.value = eligibleTrucks.value[0]?.truckId ?? dayStore.selected_truck_id ?? ''
+  } else if (!routeTargetId.value) {
+    routeTargetId.value = dayStore.selected_truck_id ?? ''
+  }
+}, { immediate: true })
+
+const targetFeasibility = computed(() =>
+  fleetFeasibility.value.find(t => t.truckId === routeTargetId.value) ?? fleetFeasibility.value[0]
 )
 
-// ─── Space check (post-delivery capacity) ─────────────────────────────────
-// Pickup happens after remaining stops deliver — van will be cleared.
-// Check: pickup alone fits in empty van.
+// ─── Expose current target's data for the template ───────────────────────
 
-const spaceOk = computed(() => {
-  if (!ev.value) return false
-  return ev.value.job.weight_lbs <= dayStore.capacity_lbs && ev.value.job.volume_ft3 <= dayStore.capacity_ft3
-})
-
-// ─── Route path: add to today's route ────────────────────────────────────
-// Both time (HOS + window) AND space must work.
-
-const canAddToRoute = computed(() => hosOk.value && canMakeWindow.value && spaceOk.value)
-
-// ─── Plan path: schedule for tomorrow ────────────────────────────────────
-// Always available as a fallback — job queues into next morning's board.
+const remainingStops = computed(() => targetFeasibility.value?.remainingStops ?? 0)
+const hosAvailable = computed(() => targetFeasibility.value?.hosAvailable ?? 11)
+const totalTimeNeeded = computed(() => targetFeasibility.value?.timeNeeded ?? 0)
+const hosOk = computed(() => targetFeasibility.value?.hosOk ?? false)
+const canMakeWindow = computed(() => targetFeasibility.value?.windowOk ?? false)
+const lastStopDoneHour = computed(() => targetFeasibility.value?.lastFreeHour ?? 0)
+const canAddToRoute = computed(() => targetFeasibility.value?.canAdd ?? false)
 
 const blockReason = computed(() => {
-  if (!hosOk.value) return `Not enough HOS — need ${totalTimeNeeded.value.toFixed(1)}h, have ${hosAvailable.value.toFixed(1)}h`
-  if (!canMakeWindow.value) return `Pickup window closes before route finishes`
+  const t = targetFeasibility.value
+  if (!t) return 'No active route'
+  if (!t.hosOk) return `Not enough HOS — need ${t.timeNeeded.toFixed(1)}h, have ${t.hosAvailable.toFixed(1)}h`
+  if (!t.windowOk) return `Pickup window closes before route finishes`
   return ''
 })
 
@@ -272,6 +314,9 @@ watch(
 
 function accept() {
   if (!ev.value || !canAddToRoute.value) return
+  if (routeTargetId.value && routeTargetId.value !== dayStore.selected_truck_id) {
+    dayStore.selectRoute(routeTargetId.value)
+  }
   dayStore.acceptDispatchEvent(ev.value)
 }
 

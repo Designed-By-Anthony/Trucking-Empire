@@ -63,6 +63,7 @@
             <component
               :is="activeComponent"
               @start-day="handleStartDay"
+              @launch-all="handleLaunchAll"
               @start-new-day="handleStartNewDay"
             />
           </div>
@@ -265,6 +266,14 @@ const activeComponent = computed(() => ({
 
 function handleStartDay({ truckId, driverId }: { truckId: string; driverId: string }) {
   dayStore.startDay(truckId, driverId)
+  dispatchEvents.scheduleEvents(gameStore.company.current_day, gameStore.company.date_tick)
+  activeTab.value = 'route'
+}
+
+function handleLaunchAll({ routes }: { routes: { truckId: string; driverId: string }[] }) {
+  for (const { truckId, driverId } of routes) {
+    dayStore.startDay(truckId, driverId)
+  }
   dispatchEvents.scheduleEvents(gameStore.company.current_day, gameStore.company.date_tick)
   activeTab.value = 'route'
 }
