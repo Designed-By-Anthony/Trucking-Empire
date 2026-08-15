@@ -171,8 +171,16 @@ function generateDeliveryJobs(seed: number, count: number): Job[] {
     const houseNum = 100 + Math.floor(rng() * 900)
     const latJitter = (rng() - 0.5) * 0.008
     const lngJitter = (rng() - 0.5) * 0.012
-    const windowOpen = [7, 8, 9, 10, 11][Math.floor(rng() * 5)]!
-    const windowClose = windowOpen + 3 + Math.floor(rng() * 5)
+    // Residential: flexible all-day window. Commercial/dock: tight 4-hour block.
+    let windowOpen: number, windowClose: number
+    if (config.type === 'residential') {
+      windowOpen = 8
+      windowClose = 18
+    } else {
+      const morning = rng() < 0.5
+      windowOpen = morning ? (rng() < 0.5 ? 8 : 9) : (rng() < 0.5 ? 12 : 13)
+      windowClose = windowOpen + 4
+    }
 
     jobs.push({
       id: `dock-s${seed}-${i}`,
@@ -226,8 +234,10 @@ function generateScheduledPickups(seed: number, count: number): Job[] {
 
   for (let i = 0; i < Math.min(count, shuffled.length); i++) {
     const customer = shuffled[i]!
-    const windowOpen = [8, 9, 10, 11][Math.floor(rng() * 4)]!
-    const windowClose = windowOpen + 2 + Math.floor(rng() * 3)
+    // Pickups are commercial or dock — tight 4-hour windows
+    const morning = rng() < 0.5
+    const windowOpen = morning ? (rng() < 0.5 ? 8 : 9) : (rng() < 0.5 ? 12 : 13)
+    const windowClose = windowOpen + 4
     const weightLbs = lerp(80, 600, rng())
     const volumeFt3 = lerp(10, 80, rng())
     const payout = lerp(55, 130, rng())

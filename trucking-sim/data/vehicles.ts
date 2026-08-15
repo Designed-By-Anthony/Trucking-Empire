@@ -10,8 +10,11 @@ export interface VehicleListing {
   mpg: number
   fuel_capacity: number
   max_weight_lbs: number
-  unlock_at_cash: number  // minimum cash to see in shop
-  phase: number           // phase this vehicle enables
+  volume_ft3: number         // cargo cube capacity
+  has_liftgate: boolean      // equipped for curbside lift delivery
+  has_dock_access: boolean   // dock-height compatible (box trucks and up)
+  unlock_at_cash: number
+  phase: number
 }
 
 export const VEHICLE_CATALOG: VehicleListing[] = [
@@ -25,6 +28,9 @@ export const VEHICLE_CATALOG: VehicleListing[] = [
     mpg: 18,
     fuel_capacity: 25,
     max_weight_lbs: 3500,
+    volume_ft3: 280,
+    has_liftgate: false,
+    has_dock_access: false,
     unlock_at_cash: 0,
     phase: 0,
   },
@@ -38,6 +44,9 @@ export const VEHICLE_CATALOG: VehicleListing[] = [
     mpg: 15,
     fuel_capacity: 30,
     max_weight_lbs: 5000,
+    volume_ft3: 320,
+    has_liftgate: false,
+    has_dock_access: false,
     unlock_at_cash: 8000,
     phase: 0,
   },
@@ -45,12 +54,15 @@ export const VEHICLE_CATALOG: VehicleListing[] = [
     id: 'cat-box-16',
     truck_type: 'Box Truck',
     name: '16ft Box Truck',
-    tagline: 'Rome, Herkimer, Clinton now in range.',
+    tagline: 'Dock access, liftgate, Rome and Herkimer in range.',
     price: 22000,
     speed_mph: 55,
     mpg: 12,
     fuel_capacity: 60,
     max_weight_lbs: 14000,
+    volume_ft3: 900,
+    has_liftgate: true,
+    has_dock_access: true,
     unlock_at_cash: 15000,
     phase: 1,
   },
@@ -64,6 +76,9 @@ export const VEHICLE_CATALOG: VehicleListing[] = [
     mpg: 10,
     fuel_capacity: 80,
     max_weight_lbs: 26000,
+    volume_ft3: 1800,
+    has_liftgate: true,
+    has_dock_access: true,
     unlock_at_cash: 30000,
     phase: 1,
   },
@@ -71,12 +86,15 @@ export const VEHICLE_CATALOG: VehicleListing[] = [
     id: 'cat-daycab',
     truck_type: 'Day Cab',
     name: 'Day Cab Semi',
-    tagline: 'Albany, Syracuse, Binghamton. You\'re in freight.',
+    tagline: "Albany, Syracuse, Binghamton. You're in freight.",
     price: 85000,
     speed_mph: 65,
     mpg: 7,
     fuel_capacity: 150,
     max_weight_lbs: 44000,
+    volume_ft3: 2400,
+    has_liftgate: true,
+    has_dock_access: true,
     unlock_at_cash: 60000,
     phase: 2,
   },
@@ -90,6 +108,9 @@ export const VEHICLE_CATALOG: VehicleListing[] = [
     mpg: 6,
     fuel_capacity: 200,
     max_weight_lbs: 80000,
+    volume_ft3: 2800,
+    has_liftgate: true,
+    has_dock_access: true,
     unlock_at_cash: 130000,
     phase: 3,
   },

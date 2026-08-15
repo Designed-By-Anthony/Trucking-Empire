@@ -7,3 +7,9 @@ export function serviceHoursForJob(job: Job): number {
   if (job.weight_lbs > 400) return 0.35
   return 0.2
 }
+
+// Stop-aware version — terminal_return stops get 45 min for unload/reload at the terminal.
+export function serviceHoursForStop(stop: { stop_type?: string; job: Job }): number {
+  if (stop.stop_type === 'terminal_return') return 0.75
+  return serviceHoursForJob(stop.job)
+}

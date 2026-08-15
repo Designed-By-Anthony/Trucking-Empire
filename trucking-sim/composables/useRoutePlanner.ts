@@ -21,14 +21,19 @@ export interface RoutePlan {
 const BASE_LAT = 43.1009
 const BASE_LNG = -75.2327
 const AVG_SPEED_MPH = 22
-const SERVICE_TIME = 0.25   // hours per stop
+const DEFAULT_SERVICE_H = 0.25   // hours per regular stop
+const TERMINAL_SERVICE_H = 0.75  // 45 min cross-dock at terminal
 const LAT_MILES = 69.0
-const LNG_MILES = 52.7      // at lat 43°N
+const LNG_MILES = 52.7           // at lat 43°N
 
 function dist(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const dLat = (lat2 - lat1) * LAT_MILES
   const dLng = (lng2 - lng1) * LNG_MILES
   return Math.sqrt(dLat ** 2 + dLng ** 2)
+}
+
+function serviceH(stop: ManifestStop): number {
+  return stop.stop_type === 'terminal_return' ? TERMINAL_SERVICE_H : DEFAULT_SERVICE_H
 }
 
 export function useRoutePlanner() {
@@ -48,6 +53,7 @@ export function useRoutePlanner() {
     const result: StopETA[] = []
 
     for (const stop of stops) {
+      const svc = serviceH(stop)
       const d = dist(lat, lng, stop.job.delivery_lat, stop.job.delivery_lng)
       const driveH = d / AVG_SPEED_MPH
       hour += driveH
@@ -55,31 +61,31 @@ export function useRoutePlanner() {
       result.push({
         job_id: stop.job.id,
         arrival_game_hour: arrival,
-        departure_game_hour: arrival + SERVICE_TIME,
+        departure_game_hour: arrival + svc,
         is_on_time: arrival <= stop.job.window_close,
         drive_time_hours: driveH,
       })
       lat = stop.job.delivery_lat
       lng = stop.job.delivery_lng
-      hour += SERVICE_TIME
+      hour += svc
     }
 
-    // Return leg stem time
-    const last = stops[stops.length - 1]
+    // Return leg: drive from last stop back to terminal
+    const last = stops[stops.length - 1]!
     const returnDist = dist(last.job.delivery_lat, last.job.delivery_lng, BASE_LAT, BASE_LNG)
     const returnH = returnDist / AVG_SPEED_MPH
     const returnHour = hour + returnH
 
-    // Stem time = driving from base to first + last to base
-    const firstStem = dist(BASE_LAT, BASE_LNG, stops[0].job.delivery_lat, stops[0].job.delivery_lng) / AVG_SPEED_MPH
+    const firstStem = dist(BASE_LAT, BASE_LNG, stops[0]!.job.delivery_lat, stops[0]!.job.delivery_lng) / AVG_SPEED_MPH
     const stemTime = firstStem + returnH
-    const inZone = result.reduce((s) => s + SERVICE_TIME, 0)
+    const inZone = result.reduce((s, r, i) => s + serviceH(stops[i]!), 0)
     const totalDrive = result.reduce((s, r) => s + r.drive_time_hours, 0) + stemTime
 
-    // Density: how spread out are the stops? 0 = city-wide, 100 = all in same block
-    const lats = stops.map(s => s.job.delivery_lat)
-    const lngs = stops.map(s => s.job.delivery_lng)
-    const spreadMi = stops.length < 2 ? 0 : Math.sqrt(
+    // Density across non-terminal stops only
+    const realStops = stops.filter(s => s.stop_type !== 'terminal_return')
+    const lats = realStops.map(s => s.job.delivery_lat)
+    const lngs = realStops.map(s => s.job.delivery_lng)
+    const spreadMi = realStops.length < 2 ? 0 : Math.sqrt(
       ((Math.max(...lats) - Math.min(...lats)) * LAT_MILES) ** 2 +
       ((Math.max(...lngs) - Math.min(...lngs)) * LNG_MILES) ** 2
     )
@@ -105,12 +111,13 @@ export function useRoutePlanner() {
     let lat = currentLat, lng = currentLng, hour = currentGameHour
     for (const stop of manifest) {
       if (stop.job.status === 'delivered') continue
+      const svc = serviceH(stop)
       const d = dist(lat, lng, stop.job.delivery_lat, stop.job.delivery_lng)
       hour += d / AVG_SPEED_MPH
       stop.eta_game_hour = hour
       lat = stop.job.delivery_lat
       lng = stop.job.delivery_lng
-      hour += SERVICE_TIME
+      hour += svc
     }
   }
 

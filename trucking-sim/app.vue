@@ -168,7 +168,7 @@ import DeliveryPanel from '~/components/ui/DeliveryPanel.vue'
 import DispatchEventModal from '~/components/ui/DispatchEventModal.vue'
 import DayDebriefModal from '~/components/ui/DayDebriefModal.vue'
 import OnboardingWizard from '~/components/ui/OnboardingWizard.vue'
-import { serviceHoursForJob } from '~/composables/useServiceTime'
+import { serviceHoursForStop } from '~/composables/useServiceTime'
 
 const gameStore = useGameStore()
 const contractStore = useContractStore()
@@ -209,7 +209,7 @@ const tabs = [
   },
 ]
 
-const serviceHours = serviceHoursForJob
+const serviceHours = serviceHoursForStop
 
 const activeComponent = computed(() => ({
   route: dayStore.phase === 'in_progress' ? DeliveryPanel : MorningBoard,
@@ -262,7 +262,7 @@ watch(() => gameStore.company.date_tick, (tick) => {
   // Auto-complete current stop when ETA + service time has elapsed
   const stop = dayStore.manifest[dayStore.current_stop_index]
   if (stop && stop.job.status !== 'delivered') {
-    if (tick >= stop.eta_game_hour + serviceHours(stop.job)) {
+    if (tick >= stop.eta_game_hour + serviceHours(stop)) {
       dayStore.completeStop(stop.eta_game_hour)
     }
     return

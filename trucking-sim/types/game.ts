@@ -61,6 +61,9 @@ export interface Truck extends Transport {
   truck_type: TruckType
   name: string
   max_weight_lbs: number
+  volume_ft3: number        // cube capacity of this truck
+  has_liftgate: boolean     // equipped for curbside lift delivery
+  has_dock_access: boolean  // dock-height compatible (box trucks and up)
   mpg: number
   fuel_level: number        // gallons remaining
   fuel_capacity: number     // max gallons
@@ -237,6 +240,10 @@ export interface ManifestStop {
   sequence: number
   eta_game_hour: number
   on_time: boolean | null
+  // 'terminal_return' stops are auto-injected mid-route when pickups hit 85% capacity.
+  // They have a synthetic job (0 payout, home coords) and 45-min service time.
+  stop_type?: 'stop' | 'terminal_return'
+  leg?: number  // which route leg (increments after each terminal_return)
 }
 
 export interface DayResult {
