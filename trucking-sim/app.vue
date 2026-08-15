@@ -226,18 +226,28 @@ function handleStartDay({ truckId, driverId }: { truckId: string; driverId: stri
 function handleStartNewDay() {
   showDebrief.value = false
   gameStore.advanceDay()
-  gameStore.snapToMorning()  // reset clock to 6 AM so morning board never shows stale time
+  gameStore.snapToMorning()
 
-  // Demurrage first — charge for freight that's been sitting too long
+  // Full overnight transition — strict sequential order:
+
+  // 1. End previous shift: unassign driver, idle truck, restore full HOS
+  if (dayStore.truck_id && dayStore.driver_id) {
+    fleetStore.endPhase0Route(dayStore.truck_id, dayStore.driver_id)
+  }
+
+  // 2. Demurrage — charge for outbound freight sitting past grace period
   networkStore.applyDemurrage(gameStore.company.current_day)
 
-  // Night cycle: carrier-assigned outbound freight departs; unassigned stays
+  // 3. Night cycle — carrier-assigned freight departs; dock_pending stays
   networkStore.processNightCycle(gameStore.company.current_day)
 
-  // Refresh spot-market carrier quotes for the new day
+  // 4. Refresh inbound dock — purge delivered items, seed overnight arrivals
+  networkStore.refreshDailyFreight(gameStore.company.current_day)
+
+  // 5. Refresh spot-market carrier quotes for the new day
   networkStore.refreshLineHaulMarket(gameStore.company.current_day)
 
-  // Build morning board from persistent dock + today's pickup requests
+  // 6. Rebuild morning board from fresh dock + today's pickup requests
   const { deliveries, pickups } = networkStore.buildMorningBoard(gameStore.company.current_day)
   dayStore.startPlanningPhase([...deliveries, ...pickups])
   activeTab.value = 'route'

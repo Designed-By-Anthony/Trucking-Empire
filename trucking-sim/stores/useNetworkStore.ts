@@ -469,6 +469,24 @@ export const useNetworkStore = defineStore('network', {
       return true
     },
 
+    // Purge delivered dock items and seed fresh overnight arrivals.
+    // Called at the top of each new day before building the morning board.
+    refreshDailyFreight(dayNumber: number) {
+      this.dock = this.dock.filter(f => f.status !== 'delivered')
+      const count = 8 + (dayNumber % 5)  // 8–12 items, varies by day
+      const jobs = generateDeliveryJobs(dayNumber * 7331 + 1009, count)
+      for (const job of jobs) {
+        this.dock.push({
+          id: `df-d${dayNumber}-${job.id}`,
+          job: { ...job, id: `arr-d${dayNumber}-${job.id}` },
+          terminal_id: HOME_TERMINAL_ID,
+          status: 'available',
+          source: 'line_haul_arrival',
+          day_arrived: dayNumber,
+        })
+      }
+    },
+
     // Build morning board: inbound deliveries from dock + pre-booked pickups
     buildMorningBoard(dayNumber: number): { deliveries: Job[], pickups: Job[] } {
       const deliveries = this.available_deliveries

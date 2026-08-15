@@ -176,6 +176,24 @@ export const useFleetStore = defineStore('fleet', {
       if (truck) truck.status = status
     },
 
+    // Full end-of-shift cleanup for Phase-0 routes.
+    // Idles the truck, unassigns the driver, and restores full HOS for the next day.
+    endPhase0Route(truckId: string, driverId: string) {
+      const truck = this.fleet.find(t => t.id === truckId)
+      const driver = this.drivers.find(d => d.id === driverId)
+      if (truck) {
+        truck.status = 'Idle'
+        truck.driver_id = null
+      }
+      if (driver) {
+        driver.assigned_truck_id = null
+        driver.status = 'Available'
+        driver.hos_drive_remaining = 11
+        driver.hos_onduty_remaining = 14
+        driver.hos_reset_remaining = 0
+      }
+    },
+
     addTruck(truck: Truck) {
       this.fleet.push(truck)
     },
