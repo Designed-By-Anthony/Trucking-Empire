@@ -115,14 +115,31 @@ export const useGameStore = defineStore('game', {
       this.company.date_tick = this.company.current_day * 24 + 6
     },
 
-    resetGameToInitialState() {
+    async resetGameToInitialState() {
       this.pause()
-      if (typeof localStorage !== 'undefined') {
-        localStorage.clear()
+      if (typeof localStorage !== 'undefined') localStorage.clear()
+      if (typeof sessionStorage !== 'undefined') sessionStorage.clear()
+
+      // Clear service worker caches so the reload gets fresh assets, not a
+      // cached build — critical when running as an installed PWA.
+      const cleanAndReload = () => {
+        if (typeof window !== 'undefined') window.location.reload()
       }
-      if (typeof window !== 'undefined') {
-        window.location.reload()
+      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+        try {
+          const [regs, cacheKeys] = await Promise.all([
+            navigator.serviceWorker.getRegistrations(),
+            caches.keys(),
+          ])
+          await Promise.all([
+            ...regs.map(r => r.unregister()),
+            ...cacheKeys.map(k => caches.delete(k)),
+          ])
+        } catch (_) {
+          // SW not available or already gone — just reload
+        }
       }
+      cleanAndReload()
     },
   },
 })

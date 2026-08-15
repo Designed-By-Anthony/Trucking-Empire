@@ -4,6 +4,14 @@ export default defineNuxtConfig({
   ssr: false,
   srcDir: '.',
 
+  app: {
+    head: {
+      meta: [
+        { name: 'viewport', content: 'width=device-width, initial-scale=1.0, viewport-fit=cover' },
+      ],
+    },
+  },
+
   modules: ['@pinia/nuxt', '@vite-pwa/nuxt'],
 
   components: {

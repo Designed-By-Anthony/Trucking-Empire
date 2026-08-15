@@ -8,8 +8,8 @@
       </ClientOnly>
     </div>
 
-    <!-- Floating pill HUD — top center -->
-    <div class="absolute top-3 left-0 right-0 z-50 flex justify-center px-4 pointer-events-none">
+    <!-- Floating pill HUD — top center; safe-area-inset-top keeps it below Dynamic Island -->
+    <div class="absolute left-0 right-0 z-50 flex justify-center px-4 pointer-events-none" style="top: max(12px, env(safe-area-inset-top, 0px))">
       <div class="pointer-events-auto w-full max-w-md">
         <HudBar />
       </div>
