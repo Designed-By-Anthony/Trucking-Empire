@@ -226,6 +226,7 @@ function handleStartDay({ truckId, driverId }: { truckId: string; driverId: stri
 function handleStartNewDay() {
   showDebrief.value = false
   gameStore.advanceDay()
+  gameStore.snapToMorning()  // reset clock to 6 AM so morning board never shows stale time
 
   // Demurrage first — charge for freight that's been sitting too long
   networkStore.applyDemurrage(gameStore.company.current_day)

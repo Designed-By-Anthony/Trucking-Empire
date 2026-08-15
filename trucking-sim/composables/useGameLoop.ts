@@ -221,8 +221,13 @@ export const useGameLoop = () => {
     const gameStore = useGameStore()
     const fleetStore = useFleetStore()
     const contractStore = useContractStore()
+    const dayStore = useDayStore()
 
     if (gameStore.clock_speed === 0) return
+
+    // Hard lock: clock does not advance while the player is in the morning board.
+    // The day only moves forward once a route starts or the debrief fires.
+    if (dayStore.phase === 'planning') return
 
     // 1× = 1 game hour per real minute (120 ticks/min × speed/120 = speed hrs/min)
     const hoursElapsed = gameStore.clock_speed / 120

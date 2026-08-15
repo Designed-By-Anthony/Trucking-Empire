@@ -110,10 +110,15 @@ export const useGameStore = defineStore('game', {
       }
     },
 
+    snapToMorning() {
+      // Snap clock to 6 AM of the current day so morning board always starts fresh
+      this.company.date_tick = this.company.current_day * 24 + 6
+    },
+
     resetGameToInitialState() {
       this.pause()
       if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem('fte_done')
+        localStorage.clear()
       }
       if (typeof window !== 'undefined') {
         window.location.reload()
