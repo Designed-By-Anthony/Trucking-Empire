@@ -4,6 +4,7 @@ import { useContractStore } from '~/stores/useContractStore'
 
 const PID_KEY = 'fe:pid'
 const LS_KEY = 'fe:state'
+const RESET_FLAG = 'fe:reset'
 
 function getPlayerId(): string {
   let id = localStorage.getItem(PID_KEY)
@@ -21,7 +22,6 @@ function timedFetch(url: string, opts?: RequestInit, ms = 4000): Promise<Respons
 }
 
 async function loadState(pid: string): Promise<{ game: any; fleet: any; contracts: any } | null> {
-  // Try KV first
   try {
     const res = await timedFetch(`/api/state?id=${encodeURIComponent(pid)}`)
     if (res.ok) {
@@ -29,7 +29,6 @@ async function loadState(pid: string): Promise<{ game: any; fleet: any; contract
       if (data?.state?.game) return data.state
     }
   } catch {}
-  // Fallback: localStorage mirror
   try {
     const raw = localStorage.getItem(LS_KEY)
     if (raw) return JSON.parse(raw)
@@ -38,9 +37,7 @@ async function loadState(pid: string): Promise<{ game: any; fleet: any; contract
 }
 
 async function saveState(pid: string, state: { game: any; fleet: any; contracts: any }) {
-  // Mirror to localStorage immediately (sync, best-effort)
   try { localStorage.setItem(LS_KEY, JSON.stringify(state)) } catch {}
-  // Push to KV (async, best-effort)
   try {
     await timedFetch('/api/state', {
       method: 'POST',
@@ -50,7 +47,6 @@ async function saveState(pid: string, state: { game: any; fleet: any; contracts:
   } catch {}
 }
 
-// Throttle: at most one KV write every 8s during active gameplay
 let saveScheduled = false
 let lastSave = 0
 const THROTTLE_MS = 8_000
@@ -62,12 +58,19 @@ function scheduleSave(pid: string, game: ReturnType<typeof useGameStore>, fleet:
   setTimeout(() => {
     saveScheduled = false
     lastSave = Date.now()
-    saveState(pid, {
-      game: game.$state,
-      fleet: fleet.$state,
-      contracts: contracts.$state,
-    })
+    saveState(pid, { game: game.$state, fleet: fleet.$state, contracts: contracts.$state })
   }, delay)
+}
+
+function wireSubscriptions(pid: string, game: ReturnType<typeof useGameStore>, fleet: ReturnType<typeof useFleetStore>, contracts: ReturnType<typeof useContractStore>) {
+  game.$subscribe(() => scheduleSave(pid, game, fleet, contracts), { detached: true })
+  fleet.$subscribe(() => scheduleSave(pid, game, fleet, contracts), { detached: true })
+  contracts.$subscribe(() => scheduleSave(pid, game, fleet, contracts), { detached: true })
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      saveState(pid, { game: game.$state, fleet: fleet.$state, contracts: contracts.$state })
+    }
+  })
 }
 
 export default defineNuxtPlugin(async () => {
@@ -75,9 +78,18 @@ export default defineNuxtPlugin(async () => {
   const fleet = useFleetStore()
   const contracts = useContractStore()
 
-  const pid = getPlayerId()
+  // If a reset was requested, skip hydration entirely so stores start clean.
+  // sessionStorage survives location.reload() within the same tab, making it
+  // a reliable one-shot signal across the reload boundary.
+  if (sessionStorage.getItem(RESET_FLAG)) {
+    sessionStorage.removeItem(RESET_FLAG)
+    const pid = getPlayerId()
+    wireSubscriptions(pid, game, fleet, contracts)
+    return
+  }
 
-  // Hydrate stores from KV (or localStorage fallback)
+  // Normal path: hydrate from KV then localStorage fallback
+  const pid = getPlayerId()
   const saved = await loadState(pid)
   if (saved) {
     if (saved.game) game.$patch(saved.game)
@@ -85,19 +97,5 @@ export default defineNuxtPlugin(async () => {
     if (saved.contracts) contracts.$patch(saved.contracts)
   }
 
-  // Subscribe to mutations → throttled KV save
-  game.$subscribe(() => scheduleSave(pid, game, fleet, contracts), { detached: true })
-  fleet.$subscribe(() => scheduleSave(pid, game, fleet, contracts), { detached: true })
-  contracts.$subscribe(() => scheduleSave(pid, game, fleet, contracts), { detached: true })
-
-  // iOS Safari fires visibilitychange just before killing the tab → save immediately
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
-      saveState(pid, {
-        game: game.$state,
-        fleet: fleet.$state,
-        contracts: contracts.$state,
-      })
-    }
-  })
+  wireSubscriptions(pid, game, fleet, contracts)
 })

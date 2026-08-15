@@ -117,8 +117,13 @@ export const useGameStore = defineStore('game', {
 
     resetGameToInitialState() {
       this.pause()
+      const pid = typeof localStorage !== 'undefined' ? localStorage.getItem('fe:pid') : null
+      // Set reset flag BEFORE clearing — sessionStorage survives location.reload()
+      // so the persist plugin sees it on the next load and skips hydration.
+      if (typeof sessionStorage !== 'undefined') sessionStorage.setItem('fe:reset', '1')
       if (typeof localStorage !== 'undefined') localStorage.clear()
-      if (typeof sessionStorage !== 'undefined') sessionStorage.clear()
+      // Delete KV state so the old save can't be loaded by a future session.
+      if (pid) fetch(`/api/state?id=${encodeURIComponent(pid)}`, { method: 'DELETE' }).catch(() => {})
       if (typeof window !== 'undefined') window.location.reload()
     },
   },
