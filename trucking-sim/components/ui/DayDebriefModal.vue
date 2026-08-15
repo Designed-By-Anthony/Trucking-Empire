@@ -1,0 +1,314 @@
+<template>
+  <!-- Header -->
+  <div
+    class="flex items-center justify-between px-5 py-4 flex-shrink-0"
+    style="border-bottom: 1px solid rgba(226,232,240,0.8);"
+  >
+    <div>
+      <h2 class="text-base font-bold" style="color: #0f172a;">Day Complete</h2>
+      <p class="text-xs mt-0.5" style="color: #94a3b8;">
+        Day {{ dayStore.day_result?.day ?? gameStore.company.current_day + 1 }}
+        &nbsp;&middot;&nbsp;
+        {{ formattedDate }}
+      </p>
+    </div>
+    <!-- Overall grade badge -->
+    <div
+      class="text-sm font-black rounded-lg px-3 py-1.5"
+      :style="gradeBadgeStyle"
+    >{{ grade }}</div>
+  </div>
+
+  <!-- Scrollable body -->
+  <div class="modal-body flex flex-col gap-4 px-4 py-4">
+
+    <!-- Revenue hero card -->
+    <div
+      class="rounded-xl px-5 py-4"
+      :style="netRevenue >= 0
+        ? 'background: rgba(240,253,244,0.9); border: 1px solid rgba(134,239,172,0.5);'
+        : 'background: rgba(254,242,242,0.9); border: 1px solid rgba(239,68,68,0.3);'"
+    >
+      <p class="text-xs font-semibold uppercase tracking-widest mb-1" :style="netRevenue >= 0 ? 'color:#059669;' : 'color:#dc2626;'">
+        {{ netRevenue >= 0 ? 'Revenue' : 'Net Loss' }}
+      </p>
+      <p
+        class="text-3xl font-black tabular-nums leading-none"
+        :style="netRevenue >= 0 ? 'color:#059669; letter-spacing:-0.04em;' : 'color:#dc2626; letter-spacing:-0.04em;'"
+      >
+        {{ netRevenue >= 0 ? '+' : '' }}${{ Math.abs(netRevenue).toLocaleString() }}
+      </p>
+      <p v-if="result && result.late_penalties > 0" class="text-xs mt-1.5" style="color: #64748b;">
+        ${{ result.revenue.toLocaleString() }} earned &minus; ${{ result.late_penalties.toLocaleString() }} late penalties
+      </p>
+    </div>
+
+    <!-- 3-col summary -->
+    <div class="grid grid-cols-3 gap-2">
+      <div
+        v-for="stat in summaryStats"
+        :key="stat.label"
+        class="rounded-xl px-3 py-3 text-center"
+        style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);"
+      >
+        <p class="text-xl font-black tabular-nums leading-none" :style="`color: ${stat.color};`">{{ stat.value }}</p>
+        <p class="text-[10px] font-semibold uppercase tracking-wider mt-1" style="color: #94a3b8;">{{ stat.label }}</p>
+      </div>
+    </div>
+
+    <!-- Scores section -->
+    <div
+      class="rounded-xl px-4 py-4 flex flex-col gap-4"
+      style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);"
+    >
+      <p class="text-xs font-bold uppercase tracking-widest" style="color: #64748b;">Performance</p>
+
+      <!-- On-time rate -->
+      <div>
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-xs font-semibold" style="color: #0f172a;">On-Time Rate</span>
+          <span class="text-xs font-bold tabular-nums" :style="`color: ${onTimeColor};`">{{ onTimePct }}%</span>
+        </div>
+        <div class="h-2 rounded-full overflow-hidden" style="background: rgba(226,232,240,0.8);">
+          <div
+            class="h-full rounded-full transition-all"
+            :style="`width: ${onTimePct}%; background: ${onTimeColor};`"
+          />
+        </div>
+      </div>
+
+      <!-- Density score -->
+      <div>
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-xs font-semibold" style="color: #0f172a;">Route Density</span>
+          <span class="text-xs font-bold tabular-nums" :style="`color: ${densityColor(result?.density_score ?? 0)};`">
+            {{ result?.density_score ?? 0 }}/100
+          </span>
+        </div>
+        <div class="h-2 rounded-full overflow-hidden" style="background: rgba(226,232,240,0.8);">
+          <div
+            class="h-full rounded-full transition-all"
+            :style="`width: ${result?.density_score ?? 0}%; background: ${densityColor(result?.density_score ?? 0)};`"
+          />
+        </div>
+        <p class="text-[10px] mt-1" style="color: #94a3b8;">
+          {{ densityHint(result?.density_score ?? 0) }}
+        </p>
+      </div>
+
+      <!-- Time split -->
+      <div class="flex items-center justify-between pt-1" style="border-top: 1px solid rgba(226,232,240,0.8);">
+        <div class="text-center flex-1">
+          <p class="text-sm font-bold tabular-nums" style="color: #0f172a;">{{ fmtHours(result?.stem_time_hours ?? 0) }}h</p>
+          <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: #94a3b8;">Driving</p>
+        </div>
+        <div class="w-px self-stretch" style="background: rgba(226,232,240,0.8);"></div>
+        <div class="text-center flex-1">
+          <p class="text-sm font-bold tabular-nums" style="color: #0f172a;">{{ fmtHours(result?.in_zone_hours ?? 0) }}h</p>
+          <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: #94a3b8;">Delivering</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stop log -->
+    <div
+      class="rounded-xl overflow-hidden"
+      style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);"
+    >
+      <p class="text-xs font-bold uppercase tracking-widest px-4 py-3" style="color: #64748b; border-bottom: 1px solid rgba(226,232,240,0.8);">
+        Stop Log
+      </p>
+      <div class="flex flex-col divide-y" style="--tw-divide-opacity:1; divide-color: rgba(226,232,240,0.8);">
+        <div
+          v-for="(stop, idx) in dayStore.manifest"
+          :key="stop.job.id"
+          class="flex items-center gap-3 px-4 py-3"
+        >
+          <!-- Status icon -->
+          <div
+            class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center"
+            :style="stopIconBg(stop)"
+          >
+            <!-- Check: delivered on time -->
+            <svg v-if="stop.on_time === true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" :style="stopIconColor(stop)">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <!-- Clock: delivered late -->
+            <svg v-else-if="stop.on_time === false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :style="stopIconColor(stop)">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 15.5 15.5"/>
+            </svg>
+            <!-- X: missed / failed -->
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" :style="stopIconColor(stop)">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </div>
+
+          <!-- Stop info -->
+          <div class="flex-1 min-w-0">
+            <p class="text-xs font-bold truncate" style="color: #0f172a;">{{ stop.job.customer_name }}</p>
+            <p class="text-[10px] truncate mt-0.5" style="color: #94a3b8;">{{ stop.job.delivery_address }}</p>
+          </div>
+
+          <!-- Right: payout + time -->
+          <div class="flex-shrink-0 text-right">
+            <p
+              class="text-xs font-bold tabular-nums"
+              :style="stop.job.status === 'delivered' ? 'color: #059669;' : 'color: #dc2626;'"
+            >
+              {{ stop.job.status === 'delivered' ? `+$${stop.job.payout}` : 'MISSED' }}
+            </p>
+            <p v-if="stop.eta_game_hour" class="text-[10px] tabular-nums mt-0.5" style="color: #94a3b8;">
+              {{ fmtHour(stop.eta_game_hour) }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Empty state -->
+        <div v-if="dayStore.manifest.length === 0" class="px-4 py-6 text-center">
+          <p class="text-xs" style="color: #94a3b8;">No stops were planned for this day.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Spacer so button doesn't clip last card -->
+    <div class="h-1"></div>
+  </div>
+
+  <!-- Footer: start new day -->
+  <div class="flex-shrink-0 px-4 pb-5 pt-3" style="border-top: 1px solid rgba(226,232,240,0.8);">
+    <button
+      @click="emit('start-new-day')"
+      class="w-full text-sm font-bold text-white rounded-xl py-3.5 transition-all active:scale-95"
+      style="background: #2563eb;"
+    >
+      Start New Day
+      <svg class="inline-block ml-1.5 -mt-0.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="5" y1="12" x2="19" y2="12"/>
+        <polyline points="12 5 19 12 12 19"/>
+      </svg>
+    </button>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useDayStore } from '~/stores/useDayStore'
+import { useGameStore } from '~/stores/useGameStore'
+import type { ManifestStop } from '~/types/game'
+
+const emit = defineEmits<{ (e: 'start-new-day'): void }>()
+
+const dayStore = useDayStore()
+const gameStore = useGameStore()
+
+const result = computed(() => dayStore.day_result)
+
+// ─── Formatting helpers ────────────────────────────────────────────────────
+
+function fmtHour(h: number): string {
+  const hour = Math.floor(h) % 24
+  const min = Math.round((h - Math.floor(h)) * 60)
+  const ampm = hour >= 12 ? 'PM' : 'AM'
+  const h12 = hour % 12 || 12
+  return `${h12}:${min.toString().padStart(2, '0')} ${ampm}`
+}
+
+function fmtHours(h: number): string {
+  return h.toFixed(1)
+}
+
+function densityColor(score: number): string {
+  if (score >= 70) return '#059669'
+  if (score >= 40) return '#d97706'
+  return '#dc2626'
+}
+
+function densityHint(score: number): string {
+  if (score >= 70) return 'Tight cluster — excellent stop density'
+  if (score >= 40) return 'Moderate spread — consider tighter zones'
+  return 'Wide spread — high stem time, low efficiency'
+}
+
+// ─── Computed data ─────────────────────────────────────────────────────────
+
+const netRevenue = computed(() => {
+  if (!result.value) return 0
+  return result.value.revenue - result.value.late_penalties
+})
+
+const onTimeCount = computed(() =>
+  dayStore.manifest.filter(s => s.on_time === true).length,
+)
+
+const onTimePct = computed(() => {
+  const delivered = result.value?.jobs_delivered ?? 0
+  if (delivered === 0) return 0
+  return Math.round((onTimeCount.value / delivered) * 100)
+})
+
+const onTimeColor = computed(() => {
+  if (onTimePct.value >= 90) return '#059669'
+  if (onTimePct.value >= 70) return '#d97706'
+  return '#dc2626'
+})
+
+const grade = computed(() => {
+  const pct = onTimePct.value
+  const density = result.value?.density_score ?? 0
+  const avg = (pct + density) / 2
+  if (avg >= 90) return 'A'
+  if (avg >= 75) return 'B'
+  if (avg >= 60) return 'C'
+  if (avg >= 45) return 'D'
+  return 'F'
+})
+
+const gradeBadgeStyle = computed(() => {
+  const g = grade.value
+  if (g === 'A') return 'background: rgba(240,253,244,0.9); color: #059669; border: 1px solid rgba(134,239,172,0.5);'
+  if (g === 'B') return 'background: rgba(219,234,254,0.8); color: #2563eb; border: 1px solid rgba(147,197,253,0.5);'
+  if (g === 'C') return 'background: rgba(255,251,235,0.9); color: #d97706; border: 1px solid rgba(253,230,138,0.5);'
+  return 'background: rgba(254,242,242,0.9); color: #dc2626; border: 1px solid rgba(239,68,68,0.3);'
+})
+
+const formattedDate = computed(() => {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  const tick = result.value?.date_tick_start ?? gameStore.company.date_tick
+  const dayOfWeek = Math.floor(tick / 24) % 7
+  return days[dayOfWeek]
+})
+
+const summaryStats = computed(() => [
+  {
+    label: 'Delivered',
+    value: result.value?.jobs_delivered ?? 0,
+    color: '#059669',
+  },
+  {
+    label: 'Failed',
+    value: result.value?.jobs_failed ?? 0,
+    color: (result.value?.jobs_failed ?? 0) > 0 ? '#dc2626' : '#94a3b8',
+  },
+  {
+    label: 'Declined',
+    value: result.value?.jobs_declined ?? 0,
+    color: '#94a3b8',
+  },
+])
+
+// ─── Stop log helpers ──────────────────────────────────────────────────────
+
+function stopIconBg(stop: ManifestStop): string {
+  if (stop.on_time === true) return 'background: rgba(240,253,244,0.9);'
+  if (stop.on_time === false) return 'background: rgba(255,251,235,0.9);'
+  return 'background: rgba(254,242,242,0.9);'
+}
+
+function stopIconColor(stop: ManifestStop): string {
+  if (stop.on_time === true) return 'color: #059669;'
+  if (stop.on_time === false) return 'color: #d97706;'
+  return 'color: #dc2626;'
+}
+</script>

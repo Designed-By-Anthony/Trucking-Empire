@@ -1,0 +1,34 @@
+name = "trucking-empire"
+main = ".output/server/index.mjs"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[triggers]
+crons = ["*/2 * * * *"]
+
+[assets]
+directory = ".output/public"
+binding = "ASSETS"
+
+[[routes]]
+pattern = "truckingempire.app"
+custom_domain = true
+
+[[routes]]
+pattern = "www.truckingempire.app"
+custom_domain = true
+
+[[kv_namespaces]]
+binding = "FREIGHT_STATE"
+id = "999852328ce5440ea19d9067a48fb812"
+preview_id = "999852328ce5440ea19d9067a48fb812"
+
+[[secrets_store_secrets]]
+binding = "VAPID_PUBLIC_KEY"
+secret_name = "VAPID_PUBLIC_KEY"
+store_id = "8c64f4aa2b9b41228f8b12984087dd3c"
+
+[[secrets_store_secrets]]
+binding = "VAPID_PRIVATE_KEY"
+secret_name = "VAPID_PRIVATE_KEY"
+store_id = "8c64f4aa2b9b41228f8b12984087dd3c"
