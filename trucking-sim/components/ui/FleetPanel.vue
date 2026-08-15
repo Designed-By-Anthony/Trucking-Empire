@@ -68,10 +68,18 @@
           </div>
         </div>
 
-        <!-- Maintenance alert -->
-        <div v-if="truck.maintenance_due" class="flex items-center gap-2 rounded-lg px-3 py-2 mb-3 text-xs font-bold" style="background: rgba(254,226,226,0.8); color: #dc2626; border: 1px solid rgba(239,68,68,0.2);">
-          <svg class="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-          Maintenance required
+        <!-- Maintenance alert + service button -->
+        <div v-if="truck.maintenance_due" class="flex items-center justify-between gap-2 rounded-lg px-3 py-2 mb-3" style="background: rgba(254,226,226,0.8); color: #dc2626; border: 1px solid rgba(239,68,68,0.2);">
+          <div class="flex items-center gap-2 text-xs font-bold">
+            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+            Maintenance required
+          </div>
+          <button
+            @click="fleetStore.serviceTruck(truck.id)"
+            :disabled="gameStore.company.cash < serviceEstimate(truck)"
+            class="flex-shrink-0 rounded-md px-2.5 py-1 text-[10px] font-black text-white transition-all active:scale-95 disabled:opacity-40"
+            style="background: #dc2626;"
+          >Service ~${{ serviceEstimate(truck) }}</button>
         </div>
 
         <!-- Fuel + Condition bars -->
@@ -370,6 +378,10 @@ function routeStopInfo(truckId: string) {
   const current = Math.min(route.current_stop_index + 1, total)
   const stop = route.manifest[route.current_stop_index]
   return { current, total, customer: stop?.job.customer_name ?? '' }
+}
+
+function serviceEstimate(truck: import('~/types/game').Truck): number {
+  return Math.max(150, Math.round(truck.odometer * 0.008 + 80))
 }
 
 function confirmSell(truckId: string) {

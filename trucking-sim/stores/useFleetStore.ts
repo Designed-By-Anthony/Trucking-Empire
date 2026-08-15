@@ -178,6 +178,19 @@ export const useFleetStore = defineStore('fleet', {
     },
 
     // Remove a hired driver from the roster. Owner-op is protected.
+    serviceTruck(truckId: string): number {
+      const truck = this.fleet.find(t => t.id === truckId)
+      if (!truck || !truck.maintenance_due) return 0
+      const cost = Math.max(150, Math.round(truck.odometer * 0.008 + 80))
+      const gameStore = useGameStore()
+      if (gameStore.company.cash < cost) return 0
+      gameStore.deductCash(cost, 'maintenance')
+      truck.maintenance_due = false
+      truck.condition = Math.min(100, truck.condition + 30)
+      if (truck.status === 'Out of Service') truck.status = 'Idle'
+      return cost
+    },
+
     fireDriver(driverId: string) {
       const driver = this.drivers.find(d => d.id === driverId)
       if (!driver || driver.is_owner_op) return
