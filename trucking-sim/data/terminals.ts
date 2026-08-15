@@ -48,8 +48,11 @@ export const INITIAL_TRUCKS: Truck[] = []
 export const INITIAL_DRIVERS: Driver[] = [
   {
     id: 'driver-you',
-    name: 'You',
+    name: 'You (Owner-Op)',
     wage_per_hr: 0,
+    daily_wage: 0,
+    license_class: 'CLASS_A',
+    is_owner_op: true,
     status: 'Available',
     assigned_truck_id: null,
     hos_drive_remaining: 11,

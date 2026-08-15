@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Job, ManifestStop, DayResult, DispatchEvent, DayPhase } from '~/types/game'
+import type { Job, ManifestStop, DayResult, DispatchEvent, DayPhase, FleetRoute } from '~/types/game'
 import { useGameStore } from '~/stores/useGameStore'
 import { useNetworkStore } from '~/stores/useNetworkStore'
 import { useFleetStore } from '~/stores/useFleetStore'
@@ -17,24 +17,59 @@ const STEM_H = 1.0            // stem time estimate (out + back)
 
 export const useDayStore = defineStore('day', {
   state: () => ({
+    // ── Global day state ──────────────────────────────────────────────────
     phase: 'planning' as DayPhase,
     available_jobs: [] as Job[],
-    manifest: [] as ManifestStop[],
-    truck_id: null as string | null,
-    driver_id: null as string | null,
-    truck_capacity_lbs: 3500,   // set from selected truck in startDay
-    truck_capacity_ft3: 280,
-    current_stop_index: 0,
     pending_events: [] as DispatchEvent[],
     active_event: null as DispatchEvent | null,
     day_result: null as DayResult | null,
-    base_lat: BASE_LAT,
-    base_lng: BASE_LNG,
-    departure_hour: 7,
+    day_history: [] as DayResult[],
     deferred_pickups: [] as Job[],
+    // ── Multi-truck fleet routes ──────────────────────────────────────────
+    // Each owned truck that has been added to today's plan gets a FleetRoute entry.
+    // selected_truck_id drives which route the MorningBoard is currently editing.
+    fleet_routes: {} as Record<string, FleetRoute>,
+    selected_truck_id: null as string | null,
   }),
 
   getters: {
+    // ── Selected-route proxy getters (backward-compatible with Phase 0 callers) ──
+    current_route(): FleetRoute | null {
+      return this.selected_truck_id ? (this.fleet_routes[this.selected_truck_id] ?? null) : null
+    },
+    manifest(): ManifestStop[] {
+      return this.current_route?.manifest ?? []
+    },
+    truck_id(): string | null {
+      return this.selected_truck_id
+    },
+    driver_id(): string | null {
+      return this.current_route?.driver_id ?? null
+    },
+    truck_capacity_lbs(): number {
+      return this.current_route?.truck_capacity_lbs ?? 3500
+    },
+    truck_capacity_ft3(): number {
+      return this.current_route?.truck_capacity_ft3 ?? 280
+    },
+    current_stop_index(): number {
+      return this.current_route?.current_stop_index ?? 0
+    },
+    departure_hour(): number {
+      return this.current_route?.departure_hour ?? 7
+    },
+    // ── Fleet-wide computed ────────────────────────────────────────────────
+    all_routes_complete(): boolean {
+      const routes = Object.values(this.fleet_routes)
+      return routes.length > 0 && routes.every(r => r.route_phase === 'complete')
+    },
+    active_route_count(): number {
+      return Object.values(this.fleet_routes).filter(r => r.route_phase === 'in_progress').length
+    },
+    configured_truck_ids(): string[] {
+      return Object.keys(this.fleet_routes)
+    },
+    // ── Per-manifest computed (from selected route) ───────────────────────
     manifest_weight_lbs(): number {
       return this.manifest.reduce((sum, s) => sum + s.job.weight_lbs, 0)
     },
@@ -69,7 +104,7 @@ export const useDayStore = defineStore('day', {
         )
         relays = Math.max(0, waves - 1)
       }
-      const estimated_hours = realStops.length * AVG_STOP_H + relays * RELAY_DWELL_H + STEM_H
+      const estimated_hours = realStops.length * AVG_STOP_H + relays * RELAY_DWELL_H + waves * STEM_H
       return { stops: realStops.length, waves, relays, estimated_hours }
     },
     // Returns block reason string, or null if the job can be added
@@ -91,7 +126,7 @@ export const useDayStore = defineStore('day', {
           Math.ceil(newVolume / Math.max(1, this.truck_capacity_ft3 * RELAY_THRESHOLD)) - 1,
           Math.ceil(newWeight / Math.max(1, this.truck_capacity_lbs * RELAY_THRESHOLD)) - 1,
         ))
-        const estimatedHours = newStopCount * AVG_STOP_H + relaysNeeded * RELAY_DWELL_H + STEM_H
+        const estimatedHours = newStopCount * AVG_STOP_H + relaysNeeded * RELAY_DWELL_H + (relaysNeeded + 1) * STEM_H
         if (estimatedHours > MAX_SHIFT_HOURS) return `Shift full (~${estimatedHours.toFixed(1)}h)`
         return null
       }
@@ -104,22 +139,73 @@ export const useDayStore = defineStore('day', {
   },
 
   actions: {
+    // ── Route management ─────────────────────────────────────────────────────
+
+    createRoute(truckId: string, driverId: string | null = null) {
+      const fleetStore = useFleetStore()
+      const truck = fleetStore.getTruckById(truckId)
+      this.fleet_routes[truckId] = {
+        truck_id: truckId,
+        driver_id: driverId,
+        manifest: [],
+        current_stop_index: 0,
+        departure_hour: 7,
+        truck_capacity_lbs: truck?.max_weight_lbs ?? 3500,
+        truck_capacity_ft3: truck?.volume_ft3 ?? 280,
+        route_phase: 'pending',
+        route_revenue: 0,
+        route_late_penalties: 0,
+        route_fuel_cost: 0,
+      }
+      if (!this.selected_truck_id) this.selected_truck_id = truckId
+    },
+
+    selectRoute(truckId: string) {
+      if (this.fleet_routes[truckId]) this.selected_truck_id = truckId
+    },
+
+    removeRoute(truckId: string) {
+      const route = this.fleet_routes[truckId]
+      if (!route || route.route_phase !== 'pending') return
+      for (const stop of route.manifest.filter(s => s.stop_type !== 'terminal_return')) {
+        stop.job.status = 'pending'
+        this.available_jobs.push(stop.job)
+      }
+      delete this.fleet_routes[truckId]
+      if (this.selected_truck_id === truckId) {
+        const remaining = Object.keys(this.fleet_routes)
+        this.selected_truck_id = remaining[0] ?? null
+      }
+    },
+
+    // ── Planning phase ────────────────────────────────────────────────────────
+
     startPlanningPhase(jobs: Job[]) {
       this.phase = 'planning'
-      this.available_jobs = [...this.deferred_pickups, ...jobs]
+      const { trucks } = useFleetStore()
+      const actionable = trucks.length === 0
+        ? jobs
+        : jobs.filter(job => trucks.some(truck => checkJobCompatibility(job, truck).ok))
+      this.available_jobs = [...this.deferred_pickups, ...actionable]
       this.deferred_pickups = []
-      this.manifest = []
-      this.current_stop_index = 0
       this.pending_events = []
       this.active_event = null
       this.day_result = null
+      // Fresh routes for the new day — one per owned truck
+      this.fleet_routes = {}
+      this.selected_truck_id = null
+      for (const truck of trucks) {
+        this.createRoute(truck.id, truck.driver_id)
+      }
     },
 
     addToManifest(job: Job) {
+      const route = this.selected_truck_id ? this.fleet_routes[this.selected_truck_id] : null
+      if (!route) return
       if (!this.can_add_job(job)) return
-      if (this.manifest.find(s => s.job.id === job.id)) return
+      if (route.manifest.find(s => s.job.id === job.id)) return
       job.status = 'on_manifest'
-      this.manifest.push({ job, sequence: this.manifest.length + 1, eta_game_hour: 8 + this.manifest.length * 0.75, on_time: null })
+      route.manifest.push({ job, sequence: route.manifest.length + 1, eta_game_hour: 8 + route.manifest.length * 0.75, on_time: null })
       this.available_jobs = this.available_jobs.filter(j => j.id !== job.id)
       if (!job.job_type || job.job_type === 'delivery') {
         useNetworkStore().consumeDelivery(job.id)
@@ -127,32 +213,44 @@ export const useDayStore = defineStore('day', {
     },
 
     removeFromManifest(jobId: string) {
-      const stop = this.manifest.find(s => s.job.id === jobId)
+      const route = this.selected_truck_id ? this.fleet_routes[this.selected_truck_id] : null
+      if (!route) return
+      const stop = route.manifest.find(s => s.job.id === jobId)
       if (!stop) return
       stop.job.status = 'pending'
-      this.manifest = this.manifest.filter(s => s.job.id !== jobId)
+      route.manifest = route.manifest.filter(s => s.job.id !== jobId)
       this.available_jobs.push(stop.job)
-      this.resequence()
+      this._resequenceRoute(route)
       if (!stop.job.job_type || stop.job.job_type === 'delivery') {
         useNetworkStore().restoreDelivery(jobId)
       }
     },
 
     reorderManifest(fromIdx: number, toIdx: number) {
-      const stops = [...this.manifest]
+      const route = this.selected_truck_id ? this.fleet_routes[this.selected_truck_id] : null
+      if (!route) return
+      const stops = [...route.manifest]
       const moved = stops.splice(fromIdx, 1)[0]
       if (moved) stops.splice(toIdx, 0, moved)
-      this.manifest = stops
-      this.resequence()
+      route.manifest = stops
+      this._resequenceRoute(route)
+    },
+
+    _resequenceRoute(route: FleetRoute) {
+      route.manifest.forEach((s, i) => { s.sequence = i + 1 })
     },
 
     resequence() {
-      this.manifest.forEach((s, i) => { s.sequence = i + 1 })
+      const route = this.selected_truck_id ? this.fleet_routes[this.selected_truck_id] : null
+      if (route) this._resequenceRoute(route)
     },
 
     optimizeManifest(truckId?: string) {
-      // Remove existing terminal_return stubs before re-optimizing
-      const realStops = this.manifest.filter(s => s.stop_type !== 'terminal_return')
+      const targetId = truckId ?? this.selected_truck_id
+      const route = targetId ? this.fleet_routes[targetId] : null
+      if (!route) return
+
+      const realStops = route.manifest.filter(s => s.stop_type !== 'terminal_return')
       if (realStops.length < 2) return
 
       const LAT_MILES = 69.0
@@ -161,16 +259,11 @@ export const useDayStore = defineStore('day', {
       const SERVICE_H = 0.25
       const DEPARTURE_H = 7
 
-      // Resolve truck capacity — fall back to state (set from last startDay)
-      const resolvedTruckId = truckId ?? this.truck_id
-      let capLbs = this.truck_capacity_lbs
-      let capFt3 = this.truck_capacity_ft3
-      if (resolvedTruckId) {
-        const truck = useFleetStore().getTruckById(resolvedTruckId)
-        if (truck) {
-          capLbs = truck.max_weight_lbs
-          capFt3 = truck.volume_ft3
-        }
+      let capLbs = route.truck_capacity_lbs
+      let capFt3 = route.truck_capacity_ft3
+      if (targetId) {
+        const truck = useFleetStore().getTruckById(targetId)
+        if (truck) { capLbs = truck.max_weight_lbs; capFt3 = truck.volume_ft3 }
       }
 
       function dist(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -211,8 +304,8 @@ export const useDayStore = defineStore('day', {
       const remaining = [...realStops]
       const ordered: ManifestStop[] = []
       let lat = BASE_LAT, lng = BASE_LNG, hour = DEPARTURE_H
-      let waveDeliveryLbs = 0, waveDeliveryFt3 = 0   // delivery freight for current departure wave
-      let pickupAccumLbs = 0, pickupAccumFt3 = 0     // pickups collected this leg
+      let waveDeliveryLbs = 0, waveDeliveryFt3 = 0
+      let pickupAccumLbs = 0, pickupAccumFt3 = 0
       let currentLeg = 1
 
       while (remaining.length > 0) {
@@ -232,15 +325,13 @@ export const useDayStore = defineStore('day', {
         const chosen = remaining.splice(bestIdx, 1)[0]!
         const isPickup = chosen.job.job_type === 'pickup'
 
-        // Relay needed BEFORE this stop if it would overflow the current wave
         const needsRelay = isPickup
-          ? pickupAccumLbs + chosen.job.weight_lbs > capLbs * RELAY_THRESHOLD ||
-            pickupAccumFt3 + chosen.job.volume_ft3 > capFt3 * RELAY_THRESHOLD
+          ? waveDeliveryLbs + pickupAccumLbs + chosen.job.weight_lbs > capLbs * RELAY_THRESHOLD ||
+            waveDeliveryFt3 + pickupAccumFt3 + chosen.job.volume_ft3 > capFt3 * RELAY_THRESHOLD
           : waveDeliveryLbs + chosen.job.weight_lbs > capLbs * RELAY_THRESHOLD ||
             waveDeliveryFt3 + chosen.job.volume_ft3 > capFt3 * RELAY_THRESHOLD
 
         if (needsRelay && remaining.length > 0) {
-          // Return chosen to remaining and inject relay — re-pick from terminal next iteration
           remaining.push(chosen)
           const dToTerminal = dist(lat, lng, BASE_LAT, BASE_LNG)
           ordered.push(makeTerminalReturn(currentLeg))
@@ -267,34 +358,44 @@ export const useDayStore = defineStore('day', {
         ordered.push({ ...chosen, leg: currentLeg })
       }
 
-      this.manifest = ordered
-      this.resequence()
+      route.manifest = ordered
+      this._resequenceRoute(route)
     },
 
+    optimizeAllRoutes() {
+      for (const truckId of Object.keys(this.fleet_routes)) {
+        this.optimizeManifest(truckId)
+      }
+    },
+
+    // ── Dispatch ──────────────────────────────────────────────────────────────
+
+    // Phase 0 compat: single-truck dispatch. Creates route if not yet present.
     startDay(truckId: string, driverId: string) {
       const gameStore = useGameStore()
       const fleetStore = useFleetStore()
       const { planRoute } = useRoutePlanner()
 
-      this.phase = 'in_progress'
-      this.truck_id = truckId
-      this.driver_id = driverId
-      this.current_stop_index = 0
-      this.departure_hour = gameStore.company.date_tick
+      if (!this.fleet_routes[truckId]) this.createRoute(truckId, driverId)
+      const route = this.fleet_routes[truckId]!
 
-      // Lock in truck capacity for this route
+      this.phase = 'in_progress'
+      this.selected_truck_id = truckId
+      route.driver_id = driverId
+      route.route_phase = 'in_progress'
+      route.current_stop_index = 0
+      route.departure_hour = gameStore.company.date_tick
+
       const truck = fleetStore.getTruckById(truckId)
       if (truck) {
-        this.truck_capacity_lbs = truck.max_weight_lbs
-        this.truck_capacity_ft3 = truck.volume_ft3
+        route.truck_capacity_lbs = truck.max_weight_lbs
+        route.truck_capacity_ft3 = truck.volume_ft3
       }
 
-      if (this.manifest.length > 0) {
-        const plan = planRoute(this.manifest, this.departure_hour)
+      if (route.manifest.length > 0) {
+        const plan = planRoute(route.manifest, route.departure_hour)
         plan.stops.forEach((eta, i) => {
-          if (this.manifest[i]) {
-            this.manifest[i]!.eta_game_hour = eta.arrival_game_hour
-          }
+          if (route.manifest[i]) route.manifest[i]!.eta_game_hour = eta.arrival_game_hour
         })
       }
 
@@ -303,59 +404,153 @@ export const useDayStore = defineStore('day', {
       fleetStore.updateDriverHOS(driverId, { status: 'Driving' })
     },
 
-    completeStop(gameHour: number) {
-      const stop = this.manifest[this.current_stop_index]
+    // Phase 1: dispatch all configured routes concurrently.
+    startFleetDay() {
+      const gameStore = useGameStore()
+      const fleetStore = useFleetStore()
+      const { planRoute } = useRoutePlanner()
+
+      this.phase = 'in_progress'
+      for (const [truckId, route] of Object.entries(this.fleet_routes)) {
+        if (route.manifest.filter(s => s.stop_type !== 'terminal_return').length === 0) continue
+        route.route_phase = 'in_progress'
+        route.current_stop_index = 0
+        route.departure_hour = gameStore.company.date_tick
+        const truck = fleetStore.getTruckById(truckId)
+        if (truck) {
+          route.truck_capacity_lbs = truck.max_weight_lbs
+          route.truck_capacity_ft3 = truck.volume_ft3
+        }
+        if (route.manifest.length > 0) {
+          const plan = planRoute(route.manifest, route.departure_hour)
+          plan.stops.forEach((eta, i) => {
+            if (route.manifest[i]) route.manifest[i]!.eta_game_hour = eta.arrival_game_hour
+          })
+        }
+        if (route.driver_id) {
+          fleetStore.assignDriverToTruck(route.driver_id, truckId)
+          fleetStore.setTruckPhase0Status(truckId, 'EN_ROUTE')
+          fleetStore.updateDriverHOS(route.driver_id, { status: 'Driving' })
+        }
+      }
+    },
+
+    // ── In-route ─────────────────────────────────────────────────────────────
+
+    // truckId selects which route's stop to advance. Defaults to selected_truck_id.
+    completeStop(gameHour: number, truckId?: string) {
+      const targetId = truckId ?? this.selected_truck_id
+      const route = targetId ? this.fleet_routes[targetId] : null
+      if (!route) return
+      const stop = route.manifest[route.current_stop_index]
       if (!stop) return
       stop.job.status = 'delivered'
       stop.on_time = gameHour <= stop.eta_game_hour + 0.25
-      this.current_stop_index++
+      route.current_stop_index++
     },
 
-    finishDay(currentTick: number, dayNumber: number) {
-      // Exclude synthetic terminal_return stops from job accounting
-      const realStops = this.manifest.filter(s => s.stop_type !== 'terminal_return')
-      const delivered = realStops.filter(s => s.job.status === 'delivered')
-      const failed = realStops.filter(s => s.job.status !== 'delivered')
+    // Settle a single route and mark it complete (called by app.vue per-truck loop).
+    completeRoute(truckId: string) {
+      const route = this.fleet_routes[truckId]
+      if (!route || route.route_phase === 'complete') return
+      const relayStops = route.manifest.filter(s => s.stop_type === 'terminal_return')
+      const delivered = route.manifest.filter(s => s.stop_type !== 'terminal_return' && s.job.status === 'delivered')
       const revenue = delivered.reduce((sum, s) => sum + s.job.payout, 0)
       const latePenalties = delivered.filter(s => s.on_time === false).length * 25
-      const lats = realStops.map(s => s.job.delivery_lat)
-      const lngs = realStops.map(s => s.job.delivery_lng)
-      const latSpread = realStops.length > 1 ? Math.max(...lats) - Math.min(...lats) : 0
-      const lngSpread = realStops.length > 1 ? Math.max(...lngs) - Math.min(...lngs) : 0
-      const spread = Math.sqrt(latSpread * latSpread + lngSpread * lngSpread)
-      this.day_result = {
+      const relayCount = relayStops.length
+      const estimatedMiles = route.manifest.filter(s => s.stop_type !== 'terminal_return').length * 3.5 + relayCount * 5 + 8
+      const fuelCost = Math.max(8, Math.round(estimatedMiles / 15 * 4.20))
+      route.route_revenue = revenue
+      route.route_late_penalties = latePenalties
+      route.route_fuel_cost = fuelCost
+      route.route_phase = 'complete'
+      const fleetStore = useFleetStore()
+      fleetStore.setTruckPhase0Status(truckId, 'Idle')
+      if (route.driver_id) fleetStore.updateDriverHOS(route.driver_id, { status: 'Available' })
+    },
+
+    // Aggregate all routes and produce the DayResult. Call when all_routes_complete === true.
+    finishDay(currentTick: number, dayNumber: number) {
+      const routes = Object.values(this.fleet_routes)
+      const activeRoutes = routes.filter(r => r.route_phase !== 'pending')
+      const source = activeRoutes.length > 0 ? activeRoutes : routes
+
+      let totalRevenue = 0, totalLatePenalties = 0, totalFuelCost = 0
+      let totalAttempted = 0, totalDelivered = 0, totalFailed = 0
+      let allLats: number[] = [], allLngs: number[] = []
+      let totalRelays = 0, totalWaves = 0
+
+      for (const route of source) {
+        const realStops = route.manifest.filter(s => s.stop_type !== 'terminal_return')
+        const relayStops = route.manifest.filter(s => s.stop_type === 'terminal_return')
+        const delivered = realStops.filter(s => s.job.status === 'delivered')
+        const failed = realStops.filter(s => s.job.status !== 'delivered')
+        const revenue = delivered.reduce((sum, s) => sum + s.job.payout, 0)
+        const latePenalties = delivered.filter(s => s.on_time === false).length * 25
+        const relayCount = relayStops.length
+        const estimatedMiles = realStops.length * 3.5 + relayCount * 5 + 8
+        const fuelCost = Math.max(8, Math.round(estimatedMiles / 15 * 4.20))
+        totalRevenue += revenue
+        totalLatePenalties += latePenalties
+        totalFuelCost += fuelCost
+        totalAttempted += realStops.length
+        totalDelivered += delivered.length
+        totalFailed += failed.length
+        totalRelays += relayCount
+        totalWaves += relayCount + 1
+        allLats.push(...realStops.map(s => s.job.delivery_lat))
+        allLngs.push(...realStops.map(s => s.job.delivery_lng))
+      }
+
+      const gameStore = useGameStore()
+      gameStore.deductCash(totalFuelCost, 'fuel')
+
+      const spread = allLats.length > 1
+        ? Math.sqrt((Math.max(...allLats) - Math.min(...allLats)) ** 2 + (Math.max(...allLngs) - Math.min(...allLngs)) ** 2)
+        : 0
+
+      const result: DayResult = {
         day: dayNumber,
         date_tick_start: currentTick,
-        jobs_attempted: realStops.length,
-        jobs_delivered: delivered.length,
-        jobs_failed: failed.length,
+        jobs_attempted: totalAttempted,
+        jobs_delivered: totalDelivered,
+        jobs_failed: totalFailed,
         jobs_declined: this.available_jobs.length,
-        revenue,
-        late_penalties: latePenalties,
+        revenue: totalRevenue,
+        late_penalties: totalLatePenalties,
+        fuel_cost: totalFuelCost,
         density_score: Math.max(0, Math.round(100 - spread * 2000)),
         stem_time_hours: 0.5,
-        in_zone_hours: delivered.length * 0.4,
+        in_zone_hours: totalDelivered * 0.4,
+        wave_count: totalWaves,
+        relay_count: totalRelays,
       }
+      this.day_result = result
+      this.day_history.push(result)
       this.phase = 'debrief'
     },
+
+    // ── Dispatch events (in-route pickups) ────────────────────────────────────
 
     acceptDispatchEvent(event: DispatchEvent) {
       const { planRoute } = useRoutePlanner()
       const gameStore = useGameStore()
+      const route = this.selected_truck_id ? this.fleet_routes[this.selected_truck_id] : null
+      if (!route) return
 
       event.accepted = true
       event.job.status = 'on_manifest'
 
-      const lastStop = this.manifest[this.manifest.length - 1]
+      const lastStop = route.manifest[route.manifest.length - 1]
       const baseEta = lastStop ? lastStop.eta_game_hour + 0.5 : gameStore.company.date_tick + 0.5
-      this.manifest.push({ job: event.job, sequence: this.manifest.length + 1, eta_game_hour: baseEta, on_time: null })
-      this.resequence()
+      route.manifest.push({ job: event.job, sequence: route.manifest.length + 1, eta_game_hour: baseEta, on_time: null })
+      this._resequenceRoute(route)
 
-      const remaining = this.manifest.slice(this.current_stop_index)
+      const remaining = route.manifest.slice(route.current_stop_index)
       if (remaining.length > 0) {
         const plan = planRoute(remaining, gameStore.company.date_tick)
         plan.stops.forEach((eta, i) => {
-          const stop = this.manifest[this.current_stop_index + i]
+          const stop = route.manifest[route.current_stop_index + i]
           if (stop) stop.eta_game_hour = eta.arrival_game_hour
         })
       }
@@ -382,14 +577,20 @@ export const useDayStore = defineStore('day', {
 
     checkPendingEvents(currentTick: number) {
       if (this.active_event) return
-      const ready = this.pending_events.find(e => e.fires_at_tick <= currentTick && e.accepted === null)
+      const ready = this.pending_events.find(
+        e => e.fires_at_tick <= currentTick && e.expires_at_tick > currentTick && e.accepted === null
+      )
       if (ready) this.active_event = ready
+    },
+
+    clearWeekHistory() {
+      this.day_history = []
     },
 
     resetDay() {
       this.phase = 'planning'
-      this.manifest = []
-      this.current_stop_index = 0
+      this.fleet_routes = {}
+      this.selected_truck_id = null
       this.pending_events = []
       this.active_event = null
       this.day_result = null

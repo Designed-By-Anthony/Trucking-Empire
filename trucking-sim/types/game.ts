@@ -19,6 +19,7 @@ export type TransportStatus =
 export type HubType = 'terminal' | 'airport' | 'seaport' | 'railyard'
 export type TruckType = 'Box Truck' | 'Day Cab' | 'Semi' | 'Flatbed' | 'Reefer'
 export type DriverStatus = 'Available' | 'Driving' | 'Off Duty' | 'Sleeper'
+export type LicenseClass = 'CLASS_C' | 'CLASS_B' | 'CLASS_A'
 export type ContractStatus = 'Available' | 'Assigned' | 'In Transit' | 'Delivered' | 'Failed'
 
 // ─── Base interfaces (extend, never replace) ───────────────────────────────
@@ -72,12 +73,17 @@ export interface Truck extends Transport {
   driver_id: string | null
   delay_hours_remaining: number  // weather/traffic delay
   maintenance_due: boolean
+  required_license: LicenseClass  // minimum license to operate this truck
+  resale_value: number            // cash returned on sale (50–70% of purchase price)
 }
 
 export interface Driver {
   id: string
   name: string
   wage_per_hr: number
+  daily_wage: number           // flat daily rate; 0 for owner-op
+  license_class: LicenseClass  // CDL tier; gates which trucks they can drive
+  is_owner_op?: boolean        // true only for "You (Owner-Op)"
   status: DriverStatus
   assigned_truck_id: string | null
   hos_drive_remaining: number    // hours of driving left (max 11)
@@ -157,6 +163,7 @@ export type JobType = 'delivery' | 'pickup'
 export interface Job {
   id: string
   job_type?: JobType          // defaults to 'delivery' when absent (backwards compat)
+  brand_id?: string           // set when this job counts toward a brand contract SLA
   freight_dest?: FreightDest  // outbound destination assigned at pickup generation time
   customer_name: string
   pickup_address: string
@@ -255,9 +262,12 @@ export interface DayResult {
   jobs_declined: number
   revenue: number
   late_penalties: number
+  fuel_cost: number
   density_score: number
   stem_time_hours: number
   in_zone_hours: number
+  wave_count: number
+  relay_count: number
 }
 
 export interface DispatchEvent {
@@ -268,4 +278,59 @@ export interface DispatchEvent {
   message: string
   accepted: boolean | null
   expires_at_tick: number
+}
+
+// ─── Phase 1: Multi-truck fleet routes ────────────────────────────────────
+
+export type RoutePhase = 'pending' | 'in_progress' | 'complete'
+
+export interface FleetRoute {
+  truck_id: string
+  driver_id: string | null
+  manifest: ManifestStop[]
+  current_stop_index: number
+  departure_hour: number
+  truck_capacity_lbs: number
+  truck_capacity_ft3: number
+  route_phase: RoutePhase
+  // Populated when route_phase === 'complete'
+  route_revenue: number
+  route_late_penalties: number
+  route_fuel_cost: number
+}
+
+// ─── Phase 1: Driver hiring marketplace ───────────────────────────────────
+
+export type DriverLicense = 'non-cdl' | 'CDL-B' | 'CDL-A'
+
+export interface HireableDriver {
+  id: string
+  name: string
+  daily_wage: number         // flat daily rate, $120–$220
+  skill_rating: number       // 1–5; affects service dwell speed multiplier
+  class_license: DriverLicense
+  available_from_day: number
+}
+
+// ─── Phase 1: Brand contracts (fictional tiers) ────────────────────────────
+
+export type ContractTier = 'local' | 'regional' | 'national'
+
+export interface BrandContract {
+  id: string
+  brand_name: string          // fictional only — Walk-Mart, Around Home, Wegboys
+  tier: ContractTier
+  weekly_volume_target: number   // packages/week to hit SLA
+  weekly_volume_delivered: number
+  payout_per_package: number
+  weekly_retainer: number        // bonus paid when SLA met
+  active: boolean
+  week_start_day: number
+}
+
+// ─── Phase 1: Dock capacity ────────────────────────────────────────────────
+
+export interface DockCapacityState {
+  max_ft3: number
+  penalty_per_hour_over: number  // overhead penalty when at 100%
 }

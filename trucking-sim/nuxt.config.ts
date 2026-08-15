@@ -20,7 +20,16 @@ export default defineNuxtConfig({
 
   vite: {
     plugins: [tailwindcss()],
+    server: {
+      watch: {
+        ignored: ['**/.wrangler/**'],
+      },
+    },
   },
+
+  watch: [
+    '!.wrangler/**',
+  ],
 
   pwa: {
     strategies: 'injectManifest',

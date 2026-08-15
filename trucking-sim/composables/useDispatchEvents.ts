@@ -54,8 +54,8 @@ export function useDispatchEvents() {
 function generatePickupJob(dayNumber: number, index: number, rng: () => number, fireHour: number): Job {
   const customers = [
     'Central NY HVAC', 'Mohawk Valley Plumbing', 'Capitol Security', 'Utica Self-Storage',
-    'Northeast Medical Group', 'Adirondack Beverage', 'Delta Engineers', 'BOCES Maintenance',
-    'Griffiss Business Park', 'Valley Printing', 'Clark Mills Dairy', 'Sangertown Suites',
+    'Northeast Medical Group', 'Adirondack Beverage', 'Delta Engineers', 'Oneida Learning Co-op',
+    'Riverside Industrial Park', 'Valley Printing', 'Clark Mills Dairy', 'Sangertown Suites',
   ]
   const locations = [
     { name: 'Oriskany Blvd', lat: 43.083, lng: -75.248 },
@@ -74,6 +74,7 @@ function generatePickupJob(dayNumber: number, index: number, rng: () => number, 
 
   return {
     id: `ej_d${dayNumber}_${index}`,
+    job_type: 'pickup' as const,
     customer_name: customer,
     pickup_address: `${100 + Math.floor(rng() * 700)} ${loc.name}, Utica NY`,
     delivery_address: `${100 + Math.floor(rng() * 700)} ${loc.name}, Utica NY`,

@@ -22,7 +22,7 @@ function timedFetch(url: string, opts?: RequestInit, ms = 4000): Promise<Respons
   return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t))
 }
 
-async function loadState(pid: string): Promise<{ game: any; fleet: any; contracts: any } | null> {
+async function loadState(pid: string): Promise<{ game: any; fleet: any; contracts: any; day?: any } | null> {
   try {
     const res = await timedFetch(`/api/state?id=${encodeURIComponent(pid)}`)
     if (res.ok) {
@@ -37,7 +37,7 @@ async function loadState(pid: string): Promise<{ game: any; fleet: any; contract
   return null
 }
 
-async function saveState(pid: string, state: { game: any; fleet: any; contracts: any }) {
+async function saveState(pid: string, state: { game: any; fleet: any; contracts: any; day: any }) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(state)) } catch {}
   try {
     await timedFetch('/api/state', {
@@ -52,24 +52,25 @@ let saveScheduled = false
 let lastSave = 0
 const THROTTLE_MS = 8_000
 
-function scheduleSave(pid: string, game: ReturnType<typeof useGameStore>, fleet: ReturnType<typeof useFleetStore>, contracts: ReturnType<typeof useContractStore>) {
+function scheduleSave(pid: string, game: ReturnType<typeof useGameStore>, fleet: ReturnType<typeof useFleetStore>, contracts: ReturnType<typeof useContractStore>, day: ReturnType<typeof useDayStore>) {
   if (saveScheduled) return
   saveScheduled = true
   const delay = Math.max(0, THROTTLE_MS - (Date.now() - lastSave))
   setTimeout(() => {
     saveScheduled = false
     lastSave = Date.now()
-    saveState(pid, { game: game.$state, fleet: fleet.$state, contracts: contracts.$state })
+    saveState(pid, { game: game.$state, fleet: fleet.$state, contracts: contracts.$state, day: { day_history: day.day_history } })
   }, delay)
 }
 
-function wireSubscriptions(pid: string, game: ReturnType<typeof useGameStore>, fleet: ReturnType<typeof useFleetStore>, contracts: ReturnType<typeof useContractStore>) {
-  game.$subscribe(() => scheduleSave(pid, game, fleet, contracts), { detached: true })
-  fleet.$subscribe(() => scheduleSave(pid, game, fleet, contracts), { detached: true })
-  contracts.$subscribe(() => scheduleSave(pid, game, fleet, contracts), { detached: true })
+function wireSubscriptions(pid: string, game: ReturnType<typeof useGameStore>, fleet: ReturnType<typeof useFleetStore>, contracts: ReturnType<typeof useContractStore>, day: ReturnType<typeof useDayStore>) {
+  game.$subscribe(() => scheduleSave(pid, game, fleet, contracts, day), { detached: true })
+  fleet.$subscribe(() => scheduleSave(pid, game, fleet, contracts, day), { detached: true })
+  contracts.$subscribe(() => scheduleSave(pid, game, fleet, contracts, day), { detached: true })
+  day.$subscribe(() => scheduleSave(pid, game, fleet, contracts, day), { detached: true })
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      saveState(pid, { game: game.$state, fleet: fleet.$state, contracts: contracts.$state })
+      saveState(pid, { game: game.$state, fleet: fleet.$state, contracts: contracts.$state, day: { day_history: day.day_history } })
     }
   })
 }
@@ -86,7 +87,7 @@ export default defineNuxtPlugin(async () => {
   if (sessionStorage.getItem(RESET_FLAG)) {
     sessionStorage.removeItem(RESET_FLAG)
     const pid = getPlayerId()
-    wireSubscriptions(pid, game, fleet, contracts)
+    wireSubscriptions(pid, game, fleet, contracts, day)
     return
   }
 
@@ -97,6 +98,7 @@ export default defineNuxtPlugin(async () => {
     if (saved.game) game.$patch(saved.game)
     if (saved.fleet) fleet.$patch(saved.fleet)
     if (saved.contracts) contracts.$patch(saved.contracts)
+    if (saved.day?.day_history) day.$patch({ day_history: saved.day.day_history })
   }
 
   // After restoring fleet state, clear any phantom truck statuses. A truck left
@@ -104,5 +106,5 @@ export default defineNuxtPlugin(async () => {
   // so the morning board can see it as available.
   fleet.validatePhantomRoutes(day.phase)
 
-  wireSubscriptions(pid, game, fleet, contracts)
+  wireSubscriptions(pid, game, fleet, contracts, day)
 })

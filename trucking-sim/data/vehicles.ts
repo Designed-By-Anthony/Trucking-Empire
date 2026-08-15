@@ -15,6 +15,8 @@ export interface VehicleListing {
   has_dock_access: boolean   // dock-height compatible (box trucks and up)
   unlock_at_cash: number
   phase: number
+  required_license: 'CLASS_C' | 'CLASS_B' | 'CLASS_A'
+  resale_value: number  // ~55-65% of price
 }
 
 export const VEHICLE_CATALOG: VehicleListing[] = [
@@ -33,6 +35,8 @@ export const VEHICLE_CATALOG: VehicleListing[] = [
     has_dock_access: false,
     unlock_at_cash: 0,
     phase: 0,
+    required_license: 'CLASS_C',
+    resale_value: 1925,
   },
   {
     id: 'cat-transit-van',
@@ -49,6 +53,8 @@ export const VEHICLE_CATALOG: VehicleListing[] = [
     has_dock_access: false,
     unlock_at_cash: 8000,
     phase: 0,
+    required_license: 'CLASS_C',
+    resale_value: 6600,
   },
   {
     id: 'cat-box-16',
@@ -65,6 +71,8 @@ export const VEHICLE_CATALOG: VehicleListing[] = [
     has_dock_access: true,
     unlock_at_cash: 15000,
     phase: 1,
+    required_license: 'CLASS_B',
+    resale_value: 12100,
   },
   {
     id: 'cat-box-26',
@@ -81,6 +89,8 @@ export const VEHICLE_CATALOG: VehicleListing[] = [
     has_dock_access: true,
     unlock_at_cash: 30000,
     phase: 1,
+    required_license: 'CLASS_B',
+    resale_value: 20900,
   },
   {
     id: 'cat-daycab',
@@ -97,6 +107,8 @@ export const VEHICLE_CATALOG: VehicleListing[] = [
     has_dock_access: true,
     unlock_at_cash: 60000,
     phase: 2,
+    required_license: 'CLASS_A',
+    resale_value: 46750,
   },
   {
     id: 'cat-semi',
@@ -113,5 +125,7 @@ export const VEHICLE_CATALOG: VehicleListing[] = [
     has_dock_access: true,
     unlock_at_cash: 130000,
     phase: 3,
+    required_license: 'CLASS_A',
+    resale_value: 88000,
   },
 ]

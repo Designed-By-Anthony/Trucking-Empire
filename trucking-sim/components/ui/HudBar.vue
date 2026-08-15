@@ -9,15 +9,15 @@
     "
   >
     <!-- Cash -->
-    <div class="flex-1 flex items-center gap-1.5 min-w-0">
+    <div class="flex-shrink-0 flex items-center gap-1.5">
       <svg class="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor" :style="{ color: cashColor }">
         <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z"/>
         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clip-rule="evenodd"/>
       </svg>
       <span
-        class="text-sm font-bold tabular-nums tracking-tight truncate"
+        class="text-sm font-bold tabular-nums tracking-tight whitespace-nowrap"
         :style="{ color: cashColor }"
-      >{{ gameStore.formattedCash }}</span>
+      >{{ gameStore.compactCash }}</span>
     </div>
 
     <!-- Speed segmented control -->
@@ -50,6 +50,26 @@
         </span>
       </div>
     </div>
+
+    <!-- Notification bell — request push permission for mid-route dispatch alerts -->
+    <button
+      v-if="notifSupported && notifPermission !== 'granted'"
+      @click="requestNotifPermission"
+      class="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-colors"
+      :style="notifPermission === 'denied'
+        ? 'background: rgba(220,38,38,0.1); color: #dc2626;'
+        : 'background: rgba(37,99,235,0.1); color: #2563eb;'"
+      :title="notifPermission === 'denied' ? 'Notifications blocked — enable in browser settings' : 'Enable dispatch alerts'"
+    >
+      <!-- Bell with slash when denied -->
+      <svg v-if="notifPermission === 'denied'" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M13.73 21a2 2 0 01-3.46 0"/><path d="M18.63 13A17.9 17.9 0 0118 8"/><path d="M6.26 6.26A5.86 5.86 0 006 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 00-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/>
+      </svg>
+      <!-- Bell ring when default -->
+      <svg v-else class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>
+      </svg>
+    </button>
 
     <!-- Nuke & Restart — long-press or double-tap to reveal confirm -->
     <button
@@ -88,6 +108,25 @@ const speeds: { value: ClockSpeed; label: string }[] = [
 const cashColor = computed(() =>
   gameStore.company.cash < 0 ? '#dc2626' : '#059669'
 )
+
+// ─── Push notification permission ─────────────────────────────────────────
+
+const notifSupported = typeof Notification !== 'undefined'
+const notifPermission = ref<NotificationPermission>(
+  notifSupported ? Notification.permission : 'denied'
+)
+
+async function requestNotifPermission() {
+  if (!notifSupported || notifPermission.value === 'denied') return
+  const result = await Notification.requestPermission()
+  notifPermission.value = result
+  if (result === 'granted') {
+    new Notification('Freight Empire', {
+      body: 'Dispatch alerts enabled. We\'ll ping you for mid-route pickups.',
+      icon: '/icons/icon-192.png',
+    })
+  }
+}
 
 // Two-tap nuke guard: first tap arms it (turns red), second tap within 3s fires it.
 const nukeArmed = ref(false)

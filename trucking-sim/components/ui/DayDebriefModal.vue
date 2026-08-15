@@ -25,22 +25,61 @@
     <!-- Revenue hero card -->
     <div
       class="rounded-xl px-5 py-4"
-      :style="netRevenue >= 0
+      :style="netShift >= 0
         ? 'background: rgba(240,253,244,0.9); border: 1px solid rgba(134,239,172,0.5);'
         : 'background: rgba(254,242,242,0.9); border: 1px solid rgba(239,68,68,0.3);'"
     >
-      <p class="text-xs font-semibold uppercase tracking-widest mb-1" :style="netRevenue >= 0 ? 'color:#059669;' : 'color:#dc2626;'">
-        {{ netRevenue >= 0 ? 'Revenue' : 'Net Loss' }}
+      <p class="text-xs font-semibold uppercase tracking-widest mb-1" :style="netShift >= 0 ? 'color:#059669;' : 'color:#dc2626;'">
+        {{ netShift >= 0 ? 'Net Shift Profit' : 'Net Loss' }}
       </p>
       <p
         class="text-3xl font-black tabular-nums leading-none"
-        :style="netRevenue >= 0 ? 'color:#059669; letter-spacing:-0.04em;' : 'color:#dc2626; letter-spacing:-0.04em;'"
+        :style="netShift >= 0 ? 'color:#059669; letter-spacing:-0.04em;' : 'color:#dc2626; letter-spacing:-0.04em;'"
       >
-        {{ netRevenue >= 0 ? '+' : '' }}${{ Math.abs(netRevenue).toLocaleString() }}
+        {{ netShift >= 0 ? '+' : '' }}${{ Math.abs(netShift).toLocaleString() }}
       </p>
-      <p v-if="result && result.late_penalties > 0" class="text-xs mt-1.5" style="color: #64748b;">
-        ${{ result.revenue.toLocaleString() }} earned &minus; ${{ result.late_penalties.toLocaleString() }} late penalties
-      </p>
+      <!-- Earnings breakdown -->
+      <div class="mt-3 flex flex-col gap-1">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px]" style="color: #64748b;">Gross Revenue</span>
+          <span class="text-[11px] font-semibold tabular-nums" style="color: #059669;">+${{ (result?.revenue ?? 0).toLocaleString() }}</span>
+        </div>
+        <div v-if="(result?.late_penalties ?? 0) > 0" class="flex items-center justify-between">
+          <span class="text-[11px]" style="color: #64748b;">Late Penalties</span>
+          <span class="text-[11px] font-semibold tabular-nums" style="color: #dc2626;">−${{ (result?.late_penalties ?? 0).toLocaleString() }}</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-[11px]" style="color: #64748b;">Fuel Cost</span>
+          <span class="text-[11px] font-semibold tabular-nums" style="color: #dc2626;">−${{ (result?.fuel_cost ?? 0).toLocaleString() }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Wave breakdown (only show if more than 1 wave ran) -->
+    <div
+      v-if="(result?.wave_count ?? 1) > 1 || (result?.relay_count ?? 0) > 0"
+      class="rounded-xl px-4 py-3 flex items-center justify-around"
+      style="background: rgba(239,246,255,0.9); border: 1px solid rgba(147,197,253,0.5);"
+    >
+      <div class="text-center">
+        <p class="text-lg font-black tabular-nums" style="color: #2563eb;">{{ result?.wave_count ?? 1 }}</p>
+        <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: #64748b;">Waves</p>
+      </div>
+      <div class="w-px self-stretch" style="background: rgba(147,197,253,0.4);"></div>
+      <div class="text-center">
+        <p class="text-lg font-black tabular-nums" style="color: #2563eb;">{{ result?.relay_count ?? 0 }}</p>
+        <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: #64748b;">Relays</p>
+      </div>
+      <div class="w-px self-stretch" style="background: rgba(147,197,253,0.4);"></div>
+      <div class="text-center">
+        <p class="text-lg font-black tabular-nums" style="color: #2563eb;">{{ stopsPerWaveLabel }}</p>
+        <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: #64748b;">Stops/Wave</p>
+      </div>
+      <div class="w-px self-stretch" style="background: rgba(147,197,253,0.4);"></div>
+      <div class="text-center">
+        <p class="text-lg font-black tabular-nums" style="color: #2563eb;">30m</p>
+        <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: #64748b;">Dwell/Relay</p>
+      </div>
     </div>
 
     <!-- 3-col summary -->
@@ -120,7 +159,7 @@
       </p>
       <div class="flex flex-col divide-y" style="--tw-divide-opacity:1; divide-color: rgba(226,232,240,0.8);">
         <div
-          v-for="(stop, idx) in dayStore.manifest"
+          v-for="(stop, idx) in dayStore.manifest.filter(s => s.stop_type !== 'terminal_return')"
           :key="stop.job.id"
           class="flex items-center gap-3 px-4 py-3"
         >
@@ -166,7 +205,7 @@
         </div>
 
         <!-- Empty state -->
-        <div v-if="dayStore.manifest.length === 0" class="px-4 py-6 text-center">
+        <div v-if="dayStore.manifest.filter(s => s.stop_type !== 'terminal_return').length === 0" class="px-4 py-6 text-center">
           <p class="text-xs" style="color: #94a3b8;">No stops were planned for this day.</p>
         </div>
       </div>
@@ -176,9 +215,10 @@
     <div class="h-1"></div>
   </div>
 
-  <!-- Footer: start new day -->
+  <!-- Footer: start new day / view week summary -->
   <div class="flex-shrink-0 px-4 pb-5 pt-3" style="border-top: 1px solid rgba(226,232,240,0.8);">
     <button
+      v-if="!isWeekEnd"
       @click="emit('start-new-day')"
       class="w-full text-sm font-bold text-white rounded-xl py-3.5 transition-all active:scale-95"
       style="background: #2563eb;"
@@ -187,6 +227,17 @@
       <svg class="inline-block ml-1.5 -mt-0.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <line x1="5" y1="12" x2="19" y2="12"/>
         <polyline points="12 5 19 12 12 19"/>
+      </svg>
+    </button>
+    <button
+      v-else
+      @click="emit('view-week-summary')"
+      class="w-full text-sm font-bold text-white rounded-xl py-3.5 transition-all active:scale-95"
+      style="background: linear-gradient(135deg, #7c3aed, #2563eb);"
+    >
+      View Week 1 Summary
+      <svg class="inline-block ml-1.5 -mt-0.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 3v18h18"/><polyline points="18 9 22 5 18 1"/><polyline points="22 5 22 19 8 19"/>
       </svg>
     </button>
   </div>
@@ -198,7 +249,10 @@ import { useDayStore } from '~/stores/useDayStore'
 import { useGameStore } from '~/stores/useGameStore'
 import type { ManifestStop } from '~/types/game'
 
-const emit = defineEmits<{ (e: 'start-new-day'): void }>()
+const emit = defineEmits<{
+  (e: 'start-new-day'): void
+  (e: 'view-week-summary'): void
+}>()
 
 const dayStore = useDayStore()
 const gameStore = useGameStore()
@@ -237,6 +291,21 @@ const netRevenue = computed(() => {
   if (!result.value) return 0
   return result.value.revenue - result.value.late_penalties
 })
+
+const netShift = computed(() => {
+  if (!result.value) return 0
+  return result.value.revenue - result.value.late_penalties - result.value.fuel_cost
+})
+
+const stopsPerWaveLabel = computed(() => {
+  if (!result.value) return '—'
+  const waves = result.value.wave_count || 1
+  const stops = result.value.jobs_attempted
+  return stops === 0 ? '0' : `~${Math.round(stops / waves)}`
+})
+
+// Days are 0-indexed; day 4 = the 5th working day = end of Week 1
+const isWeekEnd = computed(() => (result.value?.day ?? -1) >= 4)
 
 const onTimeCount = computed(() =>
   dayStore.manifest.filter(s => s.on_time === true).length,

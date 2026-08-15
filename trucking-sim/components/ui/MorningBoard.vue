@@ -39,6 +39,28 @@
   <!-- Normal planning UI -->
   <div v-else class="modal-body p-4 flex flex-col gap-4" style="overflow-y: auto;">
 
+    <!-- Truck Tabs — shown when 2+ trucks are configured -->
+    <div
+      v-if="truckTabs.length > 1"
+      class="flex gap-1.5 p-1 rounded-xl"
+      style="background: rgba(241,245,249,0.9); border: 1px solid rgba(226,232,240,0.8);"
+    >
+      <button
+        v-for="tab in truckTabs"
+        :key="tab.id"
+        @click="selectedTruckId = tab.id"
+        class="flex-1 rounded-lg px-2 py-2 text-[10px] font-black transition-all duration-150 flex flex-col items-center gap-0.5"
+        :style="selectedTruckId === tab.id
+          ? 'background: #2563eb; color: white; box-shadow: 0 2px 6px rgba(37,99,235,0.3);'
+          : 'color: #64748b;'"
+      >
+        <span class="truncate max-w-full">{{ tab.truck?.name ?? tab.id }}</span>
+        <span :style="selectedTruckId === tab.id ? 'color: rgba(255,255,255,0.75);' : 'color: #94a3b8;'" style="font-weight: 600;">
+          {{ tab.stopCount }} stop{{ tab.stopCount !== 1 ? 's' : '' }}
+        </span>
+      </button>
+    </div>
+
     <!-- Vehicle Selection -->
     <div
       class="rounded-xl p-4 flex flex-col gap-3"
@@ -505,14 +527,42 @@ const emit = defineEmits<{
 }>()
 
 // ─── Local state ─────────────────────────────────────────────────────────────
-const selectedTruckId = ref('')
-const selectedDriverId = ref('')
+const selectedTruckId = ref(dayStore.selected_truck_id ?? '')
+const selectedDriverId = ref(dayStore.current_route?.driver_id ?? '')
 const dragFromIdx = ref<number | null>(null)
 const dragToIdx = ref<number | null>(null)
 const optimized = ref(false)
 let stopRects: DOMRect[] = []
 
+// ─── Sync truck tab ↔ store ───────────────────────────────────────────────────
+watch(() => dayStore.selected_truck_id, (id) => {
+  if (id) selectedTruckId.value = id
+})
+watch(selectedTruckId, (id) => {
+  if (id && dayStore.fleet_routes[id]) {
+    dayStore.selectRoute(id)
+    selectedDriverId.value = dayStore.fleet_routes[id]?.driver_id ?? ''
+  }
+})
+watch(selectedDriverId, (id) => {
+  const route = selectedTruckId.value ? dayStore.fleet_routes[selectedTruckId.value] : null
+  if (route) route.driver_id = id || null
+})
+watch(() => dayStore.configured_truck_ids.length, (count) => {
+  if (count > 0 && !selectedTruckId.value) {
+    selectedTruckId.value = dayStore.configured_truck_ids[0] ?? ''
+  }
+}, { immediate: true })
+
 // ─── Computed ─────────────────────────────────────────────────────────────────
+const truckTabs = computed(() =>
+  dayStore.configured_truck_ids.map(id => ({
+    id,
+    truck: fleetStore.getTruckById(id),
+    stopCount: (dayStore.fleet_routes[id]?.manifest ?? []).filter(s => s.stop_type !== 'terminal_return').length,
+  }))
+)
+
 // Show drivers that are unassigned OR already assigned to the selected truck
 // (Phase 0: "You" drive your own van — you're pre-assigned to it after purchase)
 const driversForTruck = computed(() =>
@@ -597,7 +647,8 @@ function onPointerMove(e: PointerEvent) {
   if (dragFromIdx.value === null) return
   const cy = e.clientY
   for (let i = 0; i < stopRects.length; i++) {
-    if (cy >= stopRects[i].top && cy <= stopRects[i].bottom) {
+    const rect = stopRects[i]
+    if (rect && cy >= rect.top && cy <= rect.bottom) {
       dragToIdx.value = i
       return
     }

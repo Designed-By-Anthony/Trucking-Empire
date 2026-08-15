@@ -105,7 +105,41 @@
             <div class="flex items-center justify-center pt-3 pb-1 flex-shrink-0">
               <div class="w-9 h-1 rounded-full" style="background: rgba(0,0,0,0.12);"></div>
             </div>
-            <DayDebriefModal @start-new-day="handleStartNewDay" />
+            <DayDebriefModal @start-new-day="handleStartNewDay" @view-week-summary="handleViewWeekSummary" />
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- Week 1 P&L summary overlay — shown after Day 5 debrief -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition duration-300 ease-out"
+        enter-from-class="opacity-0 scale-95"
+        enter-to-class="opacity-100 scale-100"
+        leave-active-class="transition duration-150 ease-in"
+        leave-from-class="opacity-100 scale-100"
+        leave-to-class="opacity-0 scale-95"
+      >
+        <div
+          v-if="showWeekSummary"
+          class="fixed inset-0 z-50 flex items-center justify-center p-4"
+        >
+          <div class="absolute inset-0 bg-black/70" style="backdrop-filter: blur(4px);" />
+          <div
+            class="relative w-full max-w-sm flex flex-col rounded-2xl overflow-hidden"
+            style="
+              max-height: 82vh;
+              background: rgba(255,255,255,0.97);
+              backdrop-filter: blur(24px) saturate(180%);
+              border: 1px solid rgba(203,213,225,0.6);
+              box-shadow: 0 25px 60px rgba(0,0,0,0.3);
+            "
+          >
+            <div class="flex items-center justify-center pt-3 pb-1 flex-shrink-0">
+              <div class="w-9 h-1 rounded-full" style="background: rgba(0,0,0,0.12);"></div>
+            </div>
+            <WeeklyPnLModal @advance-week="handleAdvanceWeek" />
           </div>
         </div>
       </Transition>
@@ -167,19 +201,24 @@ import MorningBoard from '~/components/ui/MorningBoard.vue'
 import DeliveryPanel from '~/components/ui/DeliveryPanel.vue'
 import DispatchEventModal from '~/components/ui/DispatchEventModal.vue'
 import DayDebriefModal from '~/components/ui/DayDebriefModal.vue'
+import WeeklyPnLModal from '~/components/ui/WeeklyPnLModal.vue'
 import OnboardingWizard from '~/components/ui/OnboardingWizard.vue'
+import BrandContractsPanel from '~/components/ui/BrandContractsPanel.vue'
 import { serviceHoursForStop } from '~/composables/useServiceTime'
+import { useBrandContractStore } from '~/stores/useBrandContractStore'
 
 const gameStore = useGameStore()
 const contractStore = useContractStore()
 const dayStore = useDayStore()
 const fleetStore = useFleetStore()
 const networkStore = useNetworkStore()
+const brandContractStore = useBrandContractStore()
 const dispatchEvents = useDispatchEvents()
 const { start } = useGameLoop()
 
 const activeTab = ref<string | null>(null)
 const showDebrief = ref(false)
+const showWeekSummary = ref(false)
 
 const tabs = [
   {
@@ -198,6 +237,11 @@ const tabs = [
     icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 7h6m-6 4h4',
   },
   {
+    id: 'brands',
+    label: 'Brands',
+    icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01',
+  },
+  {
     id: 'fleet',
     label: 'Fleet',
     icon: 'M1 17h14V8H1v9zM15 17h7v-6l-2-4h-5v10zM4.5 17a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM18.5 17a1.5 1.5 0 100 3 1.5 1.5 0 000-3z',
@@ -214,6 +258,7 @@ const serviceHours = serviceHoursForStop
 const activeComponent = computed(() => ({
   route: dayStore.phase === 'in_progress' ? DeliveryPanel : MorningBoard,
   dispatch: DispatchPanel,
+  brands: BrandContractsPanel,
   fleet: FleetPanel,
   financials: FinancialsPanel,
 }[activeTab.value ?? ''] ?? null))
@@ -224,6 +269,17 @@ function handleStartDay({ truckId, driverId }: { truckId: string; driverId: stri
   activeTab.value = 'route'
 }
 
+function handleViewWeekSummary() {
+  showDebrief.value = false
+  showWeekSummary.value = true
+}
+
+function handleAdvanceWeek() {
+  showWeekSummary.value = false
+  dayStore.clearWeekHistory()
+  handleStartNewDay()
+}
+
 function handleStartNewDay() {
   showDebrief.value = false
   gameStore.advanceDay()
@@ -231,10 +287,16 @@ function handleStartNewDay() {
 
   // Full overnight transition — strict sequential order:
 
-  // 1. End previous shift: unassign driver, idle truck, restore full HOS
-  if (dayStore.truck_id && dayStore.driver_id) {
-    fleetStore.endPhase0Route(dayStore.truck_id, dayStore.driver_id)
+  // 1. End previous shift for every route that was active
+  for (const route of Object.values(dayStore.fleet_routes)) {
+    if (route.driver_id) {
+      fleetStore.endPhase0Route(route.truck_id, route.driver_id)
+    }
   }
+
+  // 1b. Settle hired-driver payroll and brand contract SLA bonuses for the day just ended
+  fleetStore.settleDriverPayroll()
+  brandContractStore.settleWeek(gameStore.company.current_day)
 
   // 2. Demurrage — charge for outbound freight sitting past grace period
   networkStore.applyDemurrage(gameStore.company.current_day)
@@ -248,55 +310,77 @@ function handleStartNewDay() {
   // 5. Refresh spot-market carrier quotes for the new day
   networkStore.refreshLineHaulMarket(gameStore.company.current_day)
 
-  // 6. Rebuild morning board from fresh dock + today's pickup requests
+  // 6. Rebuild morning board, tag brand deliveries, then start planning
   const { deliveries, pickups } = networkStore.buildMorningBoard(gameStore.company.current_day)
-  dayStore.startPlanningPhase([...deliveries, ...pickups])
+  const brandTagged = brandContractStore.tagJobs(deliveries)
+  dayStore.startPlanningPhase([...brandTagged, ...pickups])
+
+  // 7. Refresh driver hire marketplace for the new day
+  fleetStore.generateDriverPool(gameStore.company.current_day)
+
   activeTab.value = 'route'
 }
+
+// When the fleet changes during planning (e.g. onboarding purchase), ensure every
+// owned truck has a route entry so the MorningBoard can accept manifest additions.
+watch(() => fleetStore.trucks.length, () => {
+  if (dayStore.phase !== 'planning') return
+  for (const truck of fleetStore.trucks) {
+    if (!dayStore.fleet_routes[truck.id]) {
+      dayStore.createRoute(truck.id, truck.driver_id)
+    }
+  }
+})
 
 watch(() => gameStore.company.date_tick, (tick) => {
   dispatchEvents.tick(tick)
 
   if (dayStore.phase !== 'in_progress') return
 
-  // Auto-complete current stop when ETA + service time has elapsed
-  const stop = dayStore.manifest[dayStore.current_stop_index]
-  if (stop && stop.job.status !== 'delivered') {
-    if (tick >= stop.eta_game_hour + serviceHours(stop)) {
-      dayStore.completeStop(stop.eta_game_hour)
+  // ── Advance each active route independently ───────────────────────────────
+  let anyRouteStillRunning = false
+
+  for (const [truckId, route] of Object.entries(dayStore.fleet_routes)) {
+    if (route.route_phase !== 'in_progress') continue
+    anyRouteStillRunning = true
+
+    const stop = route.manifest[route.current_stop_index]
+    if (stop && stop.job.status !== 'delivered') {
+      if (tick >= stop.eta_game_hour + serviceHours(stop)) {
+        if (stop.job.brand_id) brandContractStore.recordDelivery(stop.job.brand_id)
+        dayStore.completeStop(stop.eta_game_hour, truckId)
+      }
+      continue
     }
-    return
+
+    // This route's stops are all done — settle it
+    if (route.current_stop_index >= route.manifest.length && route.manifest.length > 0) {
+      const delivered = route.manifest.filter(s => s.job.status === 'delivered')
+      const revenue = delivered.reduce((sum, s) => sum + s.job.payout, 0)
+      const penalties = route.manifest.filter(s => s.on_time === false).length * 25
+      gameStore.addCash(revenue - penalties, `day-${gameStore.company.current_day}-${truckId}`)
+
+      // Stage pickups on the outbound dock
+      const completedPickups = delivered.filter(s => s.job.job_type === 'pickup')
+      if (completedPickups.length > 0) {
+        for (const s of completedPickups) {
+          networkStore.stagePickupAsOutbound(s.job, gameStore.company.current_day)
+        }
+      } else {
+        for (const item of networkStore.dock) {
+          if (item.status === 'on_manifest') item.status = 'delivered'
+        }
+      }
+
+      dayStore.completeRoute(truckId)
+      anyRouteStillRunning = false
+    }
   }
 
-  // All stops done — settle freight, credit earnings, show debrief
-  if (dayStore.current_stop_index >= dayStore.manifest.length && dayStore.manifest.length > 0) {
-    const delivered = dayStore.manifest.filter(s => s.job.status === 'delivered')
-    const revenue = delivered.reduce((sum, s) => sum + s.job.payout, 0)
-    const penalties = dayStore.manifest.filter(s => s.on_time === false).length * 25
-    gameStore.addCash(revenue - penalties, `day-${gameStore.company.current_day}`)
-
-    // Stage each completed pickup on the outbound dock for carrier assignment.
-    // Dock freight (deliveries) is marked as departed in stagePickupAsOutbound.
-    const completedPickups = delivered.filter(s => s.job.job_type === 'pickup')
-    if (completedPickups.length > 0) {
-      for (const stop of completedPickups) {
-        networkStore.stagePickupAsOutbound(stop.job, gameStore.company.current_day)
-      }
-    } else {
-      // Mark delivered dock freight as departed even when no pickups were collected
-      for (const item of networkStore.dock) {
-        if (item.status === 'on_manifest') item.status = 'delivered'
-      }
-    }
-
+  // All configured routes complete → produce day result + show debrief
+  if (!anyRouteStillRunning && dayStore.all_routes_complete) {
     dayStore.finishDay(tick, gameStore.company.current_day)
 
-    // Reset fleet state — truck back to Idle, driver Available
-    // Must happen before debrief so FleetPanel shows correct status immediately
-    if (dayStore.truck_id) fleetStore.setTruckPhase0Status(dayStore.truck_id, 'Idle')
-    if (dayStore.driver_id) fleetStore.updateDriverHOS(dayStore.driver_id, { status: 'Available' })
-
-    // Mark FTUE complete on first successful route finish
     if (!gameStore.has_completed_onboarding) {
       gameStore.completeOnboarding()
     }

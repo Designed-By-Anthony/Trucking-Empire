@@ -35,6 +35,14 @@ export const useGameStore = defineStore('game', {
       return `${days[dayOfWeek]} ${h}:${minutes.toString().padStart(2, '0')} ${ampm}`
     },
 
+    compactCash(): string {
+      const n = this.company.cash
+      const abs = Math.abs(n)
+      const sign = n < 0 ? '-' : ''
+      if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`
+      if (abs >= 10_000) return `${sign}$${(abs / 1_000).toFixed(1)}k`
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
+    },
     formattedCash(): string {
       return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(this.company.cash)
     },

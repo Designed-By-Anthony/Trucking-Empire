@@ -1,13 +1,34 @@
 import { defineStore } from 'pinia'
-import type { Truck, Driver } from '~/types/game'
+import type { Truck, Driver, LicenseClass, HireableDriver } from '~/types/game'
 import { INITIAL_TRUCKS, INITIAL_DRIVERS } from '~/data/terminals'
 import type { VehicleListing } from '~/data/vehicles'
 import { useGameStore } from '~/stores/useGameStore'
+
+const LICENSE_RANK: Record<LicenseClass, number> = { CLASS_C: 0, CLASS_B: 1, CLASS_A: 2 }
+
+const LICENSE_TO_CLASS: Record<string, LicenseClass> = {
+  'non-cdl': 'CLASS_C',
+  'CDL-B':   'CLASS_B',
+  'CDL-A':   'CLASS_A',
+}
+
+// Fictional Utica-area driver name pool — 8 entries, cycled by day number
+const DRIVER_POOL_SEED: Omit<HireableDriver, 'id' | 'available_from_day'>[] = [
+  { name: 'Mike Ferraro',     daily_wage: 140, skill_rating: 3, class_license: 'non-cdl' },
+  { name: 'Donna Kaminski',   daily_wage: 185, skill_rating: 4, class_license: 'CDL-B'   },
+  { name: 'Ray Pellegrino',   daily_wage: 220, skill_rating: 5, class_license: 'CDL-A'   },
+  { name: 'Josh Ostrowski',   daily_wage: 120, skill_rating: 2, class_license: 'non-cdl' },
+  { name: 'Theresa Buonanno', daily_wage: 135, skill_rating: 3, class_license: 'non-cdl' },
+  { name: 'Sal Marotta',      daily_wage: 175, skill_rating: 4, class_license: 'CDL-B'   },
+  { name: 'Chris Zielinski',  daily_wage: 158, skill_rating: 3, class_license: 'CDL-B'   },
+  { name: 'Angela Coyne',     daily_wage: 215, skill_rating: 5, class_license: 'CDL-A'   },
+]
 
 export const useFleetStore = defineStore('fleet', {
   state: () => ({
     fleet: [...INITIAL_TRUCKS] as Truck[],
     drivers: [...INITIAL_DRIVERS] as Driver[],
+    driver_pool: [] as HireableDriver[],
   }),
 
   getters: {
@@ -71,17 +92,22 @@ export const useFleetStore = defineStore('fleet', {
         route_distance_miles: 0,
         delay_hours_remaining: 0,
         maintenance_due: false,
+        required_license: listing.required_license,
+        resale_value: listing.resale_value,
       }
 
       gameStore.deductCash(listing.price, 'vehicle', id)
       this.fleet.push(truck)
 
-      // First purchase: add "You (Owner)" as a free driver
+      // First purchase: add "You (Owner-Op)" as a free driver with CLASS_A license
       if (this.drivers.length === 0) {
         this.drivers.push({
           id: 'driver-you',
           name: 'You (Owner-Op)',
           wage_per_hr: 0,
+          daily_wage: 0,
+          license_class: 'CLASS_A',
+          is_owner_op: true,
           status: 'Available',
           assigned_truck_id: null,
           hos_drive_remaining: 11,
@@ -94,6 +120,69 @@ export const useFleetStore = defineStore('fleet', {
       gameStore.setPhase(listing.phase)
 
       return true
+    },
+
+    // Sell a vehicle: return resale value, unassign driver, remove from fleet.
+    // The driver stays on payroll — player must reassign or fire them separately.
+    sellVehicle(vehicleId: string) {
+      const gameStore = useGameStore()
+      const truck = this.fleet.find(t => t.id === vehicleId)
+      if (!truck || truck.status === 'EN_ROUTE' || truck.status === 'LOADING') return false
+      // Unassign driver first
+      if (truck.driver_id) {
+        const driver = this.drivers.find(d => d.id === truck.driver_id)
+        if (driver) {
+          driver.assigned_truck_id = null
+          driver.status = 'Available'
+        }
+      }
+      gameStore.addCash(truck.resale_value ?? 0, `sold-${vehicleId}`)
+      this.fleet = this.fleet.filter(t => t.id !== vehicleId)
+      return true
+    },
+
+    // Link a driver to a vehicle. Enforces license compatibility.
+    // Returns { ok: boolean; reason?: string }
+    assignDriverToVehicle(driverId: string, vehicleId: string): { ok: boolean; reason?: string } {
+      const driver = this.drivers.find(d => d.id === driverId)
+      const truck = this.fleet.find(t => t.id === vehicleId)
+      if (!driver || !truck) return { ok: false, reason: 'Not found' }
+      const driverRank = LICENSE_RANK[driver.license_class ?? 'CLASS_C']
+      const truckRank = LICENSE_RANK[truck.required_license ?? 'CLASS_C']
+      if (driverRank < truckRank) {
+        return { ok: false, reason: `Requires ${truck.required_license} — driver holds ${driver.license_class}` }
+      }
+      // Unlink previous assignments first
+      if (truck.driver_id && truck.driver_id !== driverId) {
+        const prev = this.drivers.find(d => d.id === truck.driver_id)
+        if (prev) { prev.assigned_truck_id = null; prev.status = 'Available' }
+      }
+      if (driver.assigned_truck_id && driver.assigned_truck_id !== vehicleId) {
+        const prevTruck = this.fleet.find(t => t.id === driver.assigned_truck_id)
+        if (prevTruck) prevTruck.driver_id = null
+      }
+      driver.assigned_truck_id = vehicleId
+      driver.status = 'Available'
+      truck.driver_id = driverId
+      return { ok: true }
+    },
+
+    // Safely unlink a driver from their current vehicle without removing either.
+    unassignDriver(driverId: string) {
+      const driver = this.drivers.find(d => d.id === driverId)
+      if (!driver || !driver.assigned_truck_id) return
+      const truck = this.fleet.find(t => t.id === driver.assigned_truck_id)
+      if (truck) truck.driver_id = null
+      driver.assigned_truck_id = null
+      driver.status = 'Available'
+    },
+
+    // Remove a hired driver from the roster. Owner-op is protected.
+    fireDriver(driverId: string) {
+      const driver = this.drivers.find(d => d.id === driverId)
+      if (!driver || driver.is_owner_op) return
+      this.unassignDriver(driverId)
+      this.drivers = this.drivers.filter(d => d.id !== driverId)
     },
 
     assignDriverToTruck(driverId: string, truckId: string) {
@@ -229,6 +318,50 @@ export const useFleetStore = defineStore('fleet', {
       }
     },
 
+    // Refresh the hire marketplace for a new day. Call from handleStartNewDay in app.vue.
+    generateDriverPool(dayNumber: number) {
+      const offset = dayNumber % DRIVER_POOL_SEED.length
+      const hiredNames = new Set(this.drivers.map(d => d.name))
+      const rotated = [...DRIVER_POOL_SEED.slice(offset), ...DRIVER_POOL_SEED.slice(0, offset)]
+      this.driver_pool = rotated
+        .filter(c => !hiredNames.has(c.name))
+        .slice(0, 5)
+        .map((c, i) => ({ ...c, id: `hire-${dayNumber}-${i}`, available_from_day: dayNumber }))
+    },
+
+    hireDriver(hireableId: string): boolean {
+      const hireable = this.driver_pool.find(d => d.id === hireableId)
+      if (!hireable) return false
+      const newDriver: Driver = {
+        id: `driver-${Math.random().toString(36).slice(2, 8)}`,
+        name: hireable.name,
+        wage_per_hr: 0,
+        daily_wage: hireable.daily_wage,
+        license_class: LICENSE_TO_CLASS[hireable.class_license] ?? 'CLASS_C',
+        is_owner_op: false,
+        status: 'Available',
+        assigned_truck_id: null,
+        hos_drive_remaining: 11,
+        hos_onduty_remaining: 14,
+        hos_reset_remaining: 0,
+      }
+      this.drivers.push(newDriver)
+      this.driver_pool = this.driver_pool.filter(d => d.id !== hireableId)
+      return true
+    },
+
+    // Deduct flat daily wages for all non-owner-op drivers. Call at start of each new day.
+    settleDriverPayroll(): number {
+      const gameStore = useGameStore()
+      let total = 0
+      for (const driver of this.drivers) {
+        if (driver.is_owner_op || !driver.daily_wage) continue
+        total += driver.daily_wage
+      }
+      if (total > 0) gameStore.deductCash(total, 'wages')
+      return total
+    },
+
     addTruck(truck: Truck) {
       this.fleet.push(truck)
     },
@@ -241,14 +374,28 @@ export const useFleetStore = defineStore('fleet', {
       if (this.drivers.length === 0) {
         this.drivers.push({
           id: 'driver-you',
-          name: 'You',
+          name: 'You (Owner-Op)',
           wage_per_hr: 0,
+          daily_wage: 0,
+          license_class: 'CLASS_A',
+          is_owner_op: true,
           status: 'Available',
           assigned_truck_id: null,
           hos_drive_remaining: 11,
           hos_onduty_remaining: 14,
           hos_reset_remaining: 0,
         })
+      }
+      // Backfill license_class for pre-existing drivers that predate the schema upgrade
+      for (const d of this.drivers) {
+        if (!d.license_class) d.license_class = d.is_owner_op ? 'CLASS_A' : 'CLASS_C'
+        if (d.daily_wage === undefined) d.daily_wage = 0
+      }
+      // Backfill required_license + resale_value for pre-existing trucks
+      for (const t of this.fleet) {
+        if (t.type !== 'truck') continue
+        if (!(t as Truck).required_license) (t as Truck).required_license = 'CLASS_C'
+        if (!(t as Truck).resale_value) (t as Truck).resale_value = 0
       }
     },
   },
