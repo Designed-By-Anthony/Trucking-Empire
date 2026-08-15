@@ -102,10 +102,8 @@
          style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);">
       <div class="flex-1">
         <p class="text-[10px] font-bold uppercase tracking-widest mb-1" style="color: #94a3b8;">Route Preview</p>
-        <div class="flex gap-3">
-          <span class="text-[11px] font-semibold" style="color: #64748b;">~{{ estimatedHours }}h route</span>
-          <span class="text-[11px] font-semibold" style="color: #64748b;">{{ densityLabel }}</span>
-        </div>
+        <p class="text-[11px] font-semibold" style="color: #64748b;">{{ routeSummaryLabel }}</p>
+        <p class="text-[11px] font-semibold mt-0.5" style="color: #64748b;">{{ densityLabel }}</p>
       </div>
       <div class="text-right flex-shrink-0">
         <p class="text-base font-black tabular-nums" :style="{ color: densityColor }">{{ densityScore }}</p>
@@ -119,12 +117,17 @@
       style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);"
     >
       <div class="flex items-center justify-between">
-        <p class="text-[10px] font-bold uppercase tracking-widest" style="color: #94a3b8;">Load Capacity</p>
+        <p class="text-[10px] font-bold uppercase tracking-widest" style="color: #94a3b8;">Load Capacity (Per Trip)</p>
         <span
           v-if="dayStore.is_over_capacity"
           class="text-[10px] font-bold"
           style="background: rgba(254,242,242,0.9); color: #dc2626; border: 1px solid rgba(252,165,165,0.5); border-radius: 6px; padding: 2px 8px;"
-        >OVER CAPACITY</span>
+        >SHIFT FULL</span>
+        <span
+          v-else-if="dayStore.wave_info.waves > 1"
+          class="text-[10px] font-bold"
+          style="background: rgba(219,234,254,0.8); color: #2563eb; border: 1px solid rgba(147,197,253,0.5); border-radius: 6px; padding: 2px 8px;"
+        >{{ dayStore.wave_info.waves }} WAVES</span>
       </div>
 
       <!-- Weight -->
@@ -171,7 +174,7 @@
       <!-- Section header -->
       <div class="flex items-center gap-2">
         <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color: #94a3b8;">
-          Route ({{ dayStore.manifest.length }} stop{{ dayStore.manifest.length !== 1 ? 's' : '' }})
+          Route ({{ dayStore.wave_info.stops }} stop{{ dayStore.wave_info.stops !== 1 ? 's' : '' }})
         </p>
         <div class="flex-1 h-px" style="background: rgba(226,232,240,0.8);"></div>
         <button
@@ -404,8 +407,10 @@
           <div
             v-else
             class="flex-shrink-0 text-[9px] font-black rounded-lg flex items-center justify-center"
-            style="padding: 2px 6px; height: 28px; background: rgba(241,245,249,0.9); color: #94a3b8; border: 1px solid rgba(226,232,240,0.8);"
-          >FULL</div>
+            :title="dayStore.job_block_reason(job) ?? 'Full'"
+            style="padding: 2px 6px; height: 28px;"
+            :style="blockChipStyle(job)"
+          >{{ blockChipLabel(job) }}</div>
         </div>
 
         <!-- Stats row -->
@@ -468,9 +473,9 @@
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="display: inline; margin-left: 4px; vertical-align: middle;">
           <path d="M2 6h8M7 3l3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        ({{ dayStore.manifest.length }} stop{{ dayStore.manifest.length !== 1 ? 's' : '' }}, ${{ totalPayout.toLocaleString() }})
+        ({{ dayStore.wave_info.stops }} stop{{ dayStore.wave_info.stops !== 1 ? 's' : '' }}, ${{ totalPayout.toLocaleString() }})
       </template>
-      <template v-else-if="dayStore.is_over_capacity">Over Capacity — Remove Stops</template>
+      <template v-else-if="dayStore.is_over_capacity">Shift Full — Remove Stops</template>
       <template v-else-if="!selectedTruckId || !selectedDriverId">Select Truck &amp; Driver First</template>
       <template v-else>Add Stops to Lock Route</template>
     </button>
@@ -485,6 +490,7 @@ import { useFleetStore } from '~/stores/useFleetStore'
 import { useGameStore } from '~/stores/useGameStore'
 import { useNetworkStore } from '~/stores/useNetworkStore'
 import { useRoutePlanner } from '~/composables/useRoutePlanner'
+import type { Job } from '~/types/game'
 
 // ─── Stores ──────────────────────────────────────────────────────────────────
 const dayStore = useDayStore()
@@ -548,6 +554,15 @@ const routePlan = computed(() => {
 const estimatedHours = computed(() =>
   routePlan.value ? routePlan.value.total_drive_hours.toFixed(1) : '0'
 )
+
+const routeSummaryLabel = computed(() => {
+  const info = dayStore.wave_info
+  if (info.stops === 0) return '—'
+  const waveText = info.relays > 0
+    ? ` · ${info.waves} Waves (${info.relays} Relay${info.relays !== 1 ? 's' : ''})`
+    : ''
+  return `${info.stops} Stop${info.stops !== 1 ? 's' : ''}${waveText} · ~${info.estimated_hours.toFixed(1)}h shift`
+})
 
 const densityScore = computed(() => routePlan.value?.density_score ?? 0)
 
@@ -668,5 +683,21 @@ function jobCardStyle(job: { is_emergency?: boolean }): string {
     return 'background: rgba(254,242,242,0.9); border: 1px solid rgba(252,165,165,0.4);'
   }
   return 'background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);'
+}
+
+function blockChipLabel(job: Job): string {
+  const reason = dayStore.job_block_reason(job) ?? ''
+  if (reason.includes('Dock')) return 'DOCK'
+  if (reason.includes('Liftgate')) return 'LIFT'
+  if (reason.includes('Equipment')) return 'EQUIP'
+  return 'FULL'
+}
+
+function blockChipStyle(job: Job): string {
+  const reason = dayStore.job_block_reason(job) ?? ''
+  if (reason.includes('Dock') || reason.includes('Liftgate') || reason.includes('Equipment')) {
+    return 'background: rgba(254,243,199,0.9); color: #d97706; border: 1px solid rgba(217,119,6,0.3);'
+  }
+  return 'background: rgba(241,245,249,0.9); color: #94a3b8; border: 1px solid rgba(226,232,240,0.8);'
 }
 </script>

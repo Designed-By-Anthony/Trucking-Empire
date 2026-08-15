@@ -10,6 +10,6 @@ export function serviceHoursForJob(job: Job): number {
 
 // Stop-aware version — terminal_return stops get 45 min for unload/reload at the terminal.
 export function serviceHoursForStop(stop: { stop_type?: string; job: Job }): number {
-  if (stop.stop_type === 'terminal_return') return 0.75
+  if (stop.stop_type === 'terminal_return') return 0.5
   return serviceHoursForJob(stop.job)
 }

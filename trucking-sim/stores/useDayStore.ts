@@ -9,7 +9,11 @@ import { checkJobCompatibility } from '~/composables/useEquipmentCheck'
 const BASE_LAT = 43.1009
 const BASE_LNG = -75.2327
 const BASE_ADDRESS = 'Utica Terminal – 200 Oriskany Blvd, Utica NY'
-const RELAY_THRESHOLD = 0.85  // inject terminal return at 85% pickup capacity
+const RELAY_THRESHOLD = 0.85  // inject terminal return at 85% capacity
+const MAX_SHIFT_HOURS = 10    // HOS practical daily limit
+const AVG_STOP_H = 0.35       // avg hours per stop (drive + service)
+const RELAY_DWELL_H = 0.5     // 30-min cross-dock dwell per relay
+const STEM_H = 1.0            // stem time estimate (out + back)
 
 export const useDayStore = defineStore('day', {
   state: () => ({
@@ -44,13 +48,34 @@ export const useDayStore = defineStore('day', {
       return Math.min(100, (this.manifest_volume_ft3 / this.truck_capacity_ft3) * 100)
     },
     is_over_capacity(): boolean {
-      return this.manifest_weight_lbs > this.truck_capacity_lbs || this.manifest_volume_ft3 > this.truck_capacity_ft3
+      return this.wave_info.estimated_hours > MAX_SHIFT_HOURS
+    },
+    // Estimates wave breakdown for current manifest (pre- and post-optimization)
+    wave_info(): { stops: number; waves: number; relays: number; estimated_hours: number } {
+      const realStops = this.manifest.filter(s => s.stop_type !== 'terminal_return')
+      const existingRelays = this.manifest.filter(s => s.stop_type === 'terminal_return')
+      let waves: number
+      let relays: number
+      if (existingRelays.length > 0) {
+        relays = existingRelays.length
+        waves = relays + 1
+      } else {
+        const totalVolume = realStops.reduce((s, r) => s + r.job.volume_ft3, 0)
+        const totalWeight = realStops.reduce((s, r) => s + r.job.weight_lbs, 0)
+        waves = Math.max(
+          Math.ceil(totalVolume / Math.max(1, this.truck_capacity_ft3 * RELAY_THRESHOLD)),
+          Math.ceil(totalWeight / Math.max(1, this.truck_capacity_lbs * RELAY_THRESHOLD)),
+          1,
+        )
+        relays = Math.max(0, waves - 1)
+      }
+      const estimated_hours = realStops.length * AVG_STOP_H + relays * RELAY_DWELL_H + STEM_H
+      return { stops: realStops.length, waves, relays, estimated_hours }
     },
     // Returns block reason string, or null if the job can be added
     job_block_reason(): (job: Job) => string | null {
       return (job: Job) => {
-        if (this.manifest_weight_lbs + job.weight_lbs > this.truck_capacity_lbs) return 'Over weight capacity'
-        if (this.manifest_volume_ft3 + job.volume_ft3 > this.truck_capacity_ft3) return 'Over volume capacity'
+        // Equipment checks always block regardless of wave count
         if (this.truck_id) {
           const truck = useFleetStore().getTruckById(this.truck_id)
           if (truck) {
@@ -58,6 +83,16 @@ export const useDayStore = defineStore('day', {
             if (!compat.ok) return compat.reason ?? 'Equipment incompatible'
           }
         }
+        // Time-based cap: estimate shift length with this job added
+        const newStopCount = this.manifest.filter(s => s.stop_type !== 'terminal_return').length + 1
+        const newVolume = this.manifest_volume_ft3 + job.volume_ft3
+        const newWeight = this.manifest_weight_lbs + job.weight_lbs
+        const relaysNeeded = Math.max(0, Math.max(
+          Math.ceil(newVolume / Math.max(1, this.truck_capacity_ft3 * RELAY_THRESHOLD)) - 1,
+          Math.ceil(newWeight / Math.max(1, this.truck_capacity_lbs * RELAY_THRESHOLD)) - 1,
+        ))
+        const estimatedHours = newStopCount * AVG_STOP_H + relaysNeeded * RELAY_DWELL_H + STEM_H
+        if (estimatedHours > MAX_SHIFT_HOURS) return `Shift full (~${estimatedHours.toFixed(1)}h)`
         return null
       }
     },
@@ -175,59 +210,57 @@ export const useDayStore = defineStore('day', {
 
       const remaining = [...realStops]
       const ordered: ManifestStop[] = []
-      let lat = BASE_LAT
-      let lng = BASE_LNG
-      let hour = DEPARTURE_H
-      let pickupWeightAccum = 0
-      let pickupVolumeAccum = 0
+      let lat = BASE_LAT, lng = BASE_LNG, hour = DEPARTURE_H
+      let waveDeliveryLbs = 0, waveDeliveryFt3 = 0   // delivery freight for current departure wave
+      let pickupAccumLbs = 0, pickupAccumFt3 = 0     // pickups collected this leg
       let currentLeg = 1
 
       while (remaining.length > 0) {
-        let bestIdx = 0
-        let bestScore = Infinity
-
+        let bestIdx = 0, bestScore = Infinity
         for (let i = 0; i < remaining.length; i++) {
           const stop = remaining[i]!
           const d = dist(lat, lng, stop.job.delivery_lat, stop.job.delivery_lng)
           const eta = hour + d / AVG_SPEED_MPH
           const latePenalty = eta > stop.job.window_close ? (eta - stop.job.window_close) * 200 : 0
           const urgencyBonus = stop.job.window_close * 5
-          const score = d + latePenalty + urgencyBonus
-          if (score < bestScore) {
-            bestScore = score
+          if (d + latePenalty + urgencyBonus < bestScore) {
+            bestScore = d + latePenalty + urgencyBonus
             bestIdx = i
           }
         }
 
         const chosen = remaining.splice(bestIdx, 1)[0]!
-        const dToChosen = dist(lat, lng, chosen.job.delivery_lat, chosen.job.delivery_lng)
+        const isPickup = chosen.job.job_type === 'pickup'
 
-        if (chosen.job.job_type === 'pickup') {
-          pickupWeightAccum += chosen.job.weight_lbs
-          pickupVolumeAccum += chosen.job.volume_ft3
-        }
+        // Relay needed BEFORE this stop if it would overflow the current wave
+        const needsRelay = isPickup
+          ? pickupAccumLbs + chosen.job.weight_lbs > capLbs * RELAY_THRESHOLD ||
+            pickupAccumFt3 + chosen.job.volume_ft3 > capFt3 * RELAY_THRESHOLD
+          : waveDeliveryLbs + chosen.job.weight_lbs > capLbs * RELAY_THRESHOLD ||
+            waveDeliveryFt3 + chosen.job.volume_ft3 > capFt3 * RELAY_THRESHOLD
 
-        // Inject terminal relay when accumulated pickups hit 85% of truck capacity,
-        // but only when more stops remain — no relay needed as the final act.
-        const needsRelay = (
-          pickupWeightAccum >= capLbs * RELAY_THRESHOLD ||
-          pickupVolumeAccum >= capFt3 * RELAY_THRESHOLD
-        ) && remaining.length > 0
-
-        if (needsRelay) {
-          ordered.push({ ...chosen, leg: currentLeg })
-          const dToTerminal = dist(chosen.job.delivery_lat, chosen.job.delivery_lng, BASE_LAT, BASE_LNG)
+        if (needsRelay && remaining.length > 0) {
+          // Return chosen to remaining and inject relay — re-pick from terminal next iteration
+          remaining.push(chosen)
+          const dToTerminal = dist(lat, lng, BASE_LAT, BASE_LNG)
           ordered.push(makeTerminalReturn(currentLeg))
-          // Advance clock: drive to chosen stop + service + drive back + 45-min cross-dock
-          hour += dToChosen / AVG_SPEED_MPH + SERVICE_H + dToTerminal / AVG_SPEED_MPH + 0.75
-          lat = BASE_LAT
-          lng = BASE_LNG
-          pickupWeightAccum = 0
-          pickupVolumeAccum = 0
+          hour += dToTerminal / AVG_SPEED_MPH + RELAY_DWELL_H
+          lat = BASE_LAT; lng = BASE_LNG
+          waveDeliveryLbs = 0; waveDeliveryFt3 = 0
+          pickupAccumLbs = 0; pickupAccumFt3 = 0
           currentLeg++
           continue
         }
 
+        if (isPickup) {
+          pickupAccumLbs += chosen.job.weight_lbs
+          pickupAccumFt3 += chosen.job.volume_ft3
+        } else {
+          waveDeliveryLbs += chosen.job.weight_lbs
+          waveDeliveryFt3 += chosen.job.volume_ft3
+        }
+
+        const dToChosen = dist(lat, lng, chosen.job.delivery_lat, chosen.job.delivery_lng)
         hour += dToChosen / AVG_SPEED_MPH + SERVICE_H
         lat = chosen.job.delivery_lat
         lng = chosen.job.delivery_lng
