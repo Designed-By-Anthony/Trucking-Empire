@@ -11,9 +11,9 @@ const BASE_LNG = -75.2327
 const BASE_ADDRESS = 'Utica Terminal – 200 Oriskany Blvd, Utica NY'
 const RELAY_THRESHOLD = 0.85  // inject terminal return at 85% capacity
 const MAX_SHIFT_HOURS = 10    // HOS practical daily limit
-const AVG_STOP_H = 0.35       // avg hours per stop (drive + service)
+const AVG_STOP_H = 0.28       // avg hours per stop — 0.25h service + ~0.03h drive (Utica compact zone)
 const RELAY_DWELL_H = 0.5     // 30-min cross-dock dwell per relay
-const STEM_H = 1.0            // stem time estimate (out + back)
+const STEM_H = 0.5            // stem time estimate (first stop out + return leg)
 
 export const useDayStore = defineStore('day', {
   state: () => ({
