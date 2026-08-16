@@ -145,7 +145,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useGameStore } from '~/stores/useGameStore'
-import { syncByEmail } from '~/plugins/persist.client'
+import { syncByEmail } from '~/composables/useSyncEmail'
 
 const gameStore = useGameStore()
 

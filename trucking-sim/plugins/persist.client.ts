@@ -88,52 +88,12 @@ function wireSubscriptions(game: ReturnType<typeof useGameStore>, fleet: ReturnT
   })
 }
 
-// Exported so FinancialsPanel / settings can trigger email link/restore.
-// Returns 'linked' if this is a fresh link (no existing cloud save for this email),
-// 'restored' if an existing save was found and applied, or 'error'.
-export type SyncResult = 'linked' | 'restored' | 'error'
-
-let _game: ReturnType<typeof useGameStore> | null = null
-let _fleet: ReturnType<typeof useFleetStore> | null = null
-let _contracts: ReturnType<typeof useContractStore> | null = null
-let _day: ReturnType<typeof useDayStore> | null = null
-
-export async function syncByEmail(email: string): Promise<SyncResult> {
-  if (!_game || !_fleet || !_contracts || !_day) return 'error'
-  const pid = `email:${email.trim().toLowerCase()}`
-  try {
-    const existing = await loadState(pid)
-    if (existing?.game) {
-      // Remote save found — hydrate stores and apply email
-      if (existing.game) _game.$patch(existing.game)
-      if (existing.fleet) _fleet.$patch(existing.fleet)
-      if (existing.contracts) _contracts.$patch(existing.contracts)
-      if (existing.day?.day_history) _day.$patch({ day_history: existing.day.day_history })
-      _game.company.player_email = email.trim().toLowerCase()
-      await saveState(pid, buildBundle(_game, _fleet, _contracts, _day))
-      return 'restored'
-    } else {
-      // No remote save — link current progress to this email
-      _game.company.player_email = email.trim().toLowerCase()
-      await saveState(pid, buildBundle(_game, _fleet, _contracts, _day))
-      return 'linked'
-    }
-  } catch {
-    return 'error'
-  }
-}
 
 export default defineNuxtPlugin(async () => {
   const game = useGameStore()
   const fleet = useFleetStore()
   const contracts = useContractStore()
   const day = useDayStore()
-
-  // Store refs for syncByEmail
-  _game = game
-  _fleet = fleet
-  _contracts = contracts
-  _day = day
 
   // If a reset was requested, skip hydration entirely
   if (sessionStorage.getItem(RESET_FLAG)) {
