@@ -276,9 +276,30 @@ const activeComponent = computed(() => ({
   financials: FinancialsPanel,
 }[activeTab.value ?? ''] ?? null))
 
+function getPlayerId(): string {
+  const email = gameStore.company.player_email?.trim().toLowerCase()
+  if (email) return `email:${email}`
+  return localStorage.getItem('fe:pid') ?? ''
+}
+
+function notifyRouteLaunch() {
+  const pid = getPlayerId()
+  if (!pid) return
+  // Fire-and-forget: store departure time + manifest so server can compute offline progression
+  const manifests = Object.values(dayStore.fleet_routes)
+    .filter(r => r.route_phase === 'in_progress')
+    .map(r => r.manifest)
+  fetch('/api/route-launch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ playerId: pid, launchedAt: Date.now(), manifest: manifests }),
+  }).catch(() => {})
+}
+
 function handleStartDay({ truckId, driverId }: { truckId: string; driverId: string }) {
   dayStore.startDay(truckId, driverId)
   dispatchEvents.scheduleEvents(gameStore.company.current_day, gameStore.company.date_tick)
+  notifyRouteLaunch()
   activeTab.value = 'route'
 }
 
@@ -287,6 +308,7 @@ function handleLaunchAll({ routes }: { routes: { truckId: string; driverId: stri
     dayStore.startDay(truckId, driverId)
   }
   dispatchEvents.scheduleEvents(gameStore.company.current_day, gameStore.company.date_tick)
+  notifyRouteLaunch()
   activeTab.value = 'route'
 }
 

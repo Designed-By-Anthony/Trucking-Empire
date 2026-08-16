@@ -38,6 +38,11 @@ binding = "FREIGHT_STATE"
 id = "999852328ce5440ea19d9067a48fb812"
 preview_id = "999852328ce5440ea19d9067a48fb812"
 
+[[d1_databases]]
+binding = "FREIGHT_DB"
+database_name = "freight-empire"
+database_id = "26060778-3e81-4a66-bdd7-9cfcd5494031"
+
 [[secrets_store_secrets]]
 binding = "VAPID_PUBLIC_KEY"
 secret_name = "VAPID_PUBLIC_KEY"
