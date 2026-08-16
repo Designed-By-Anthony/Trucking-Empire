@@ -2,6 +2,8 @@ import { useGameStore } from '~/stores/useGameStore'
 import { useFleetStore } from '~/stores/useFleetStore'
 import { useContractStore } from '~/stores/useContractStore'
 import { useDayStore } from '~/stores/useDayStore'
+import { useNetworkStore } from '~/stores/useNetworkStore'
+import { applyOfflineProgression } from '~/composables/useOfflineProgression'
 
 export type SyncResult = 'linked' | 'restored' | 'error'
 
@@ -40,8 +42,21 @@ async function saveState(pid: string, state: object) {
   } catch {}
 }
 
-function buildBundle(game: ReturnType<typeof useGameStore>, fleet: ReturnType<typeof useFleetStore>, contracts: ReturnType<typeof useContractStore>, day: ReturnType<typeof useDayStore>) {
-  return { game: game.$state, fleet: fleet.$state, contracts: contracts.$state, day: { day_history: day.day_history } }
+function buildBundle(
+  game: ReturnType<typeof useGameStore>,
+  fleet: ReturnType<typeof useFleetStore>,
+  contracts: ReturnType<typeof useContractStore>,
+  day: ReturnType<typeof useDayStore>,
+  network: ReturnType<typeof useNetworkStore>,
+) {
+  return {
+    game: game.$state,
+    fleet: fleet.$state,
+    contracts: contracts.$state,
+    day: day.$state,
+    network: network.$state,
+    saved_at: Date.now(),
+  }
 }
 
 export async function syncByEmail(email: string): Promise<SyncResult> {
@@ -49,21 +64,24 @@ export async function syncByEmail(email: string): Promise<SyncResult> {
   const fleet = useFleetStore()
   const contracts = useContractStore()
   const day = useDayStore()
+  const network = useNetworkStore()
 
   const pid = `email:${email.trim().toLowerCase()}`
   try {
-    const existing = await loadState(pid)
+    let existing = await loadState(pid)
     if (existing?.game) {
+      existing = applyOfflineProgression(existing)
       game.$patch(existing.game)
       if (existing.fleet) fleet.$patch(existing.fleet)
       if (existing.contracts) contracts.$patch(existing.contracts)
-      if (existing.day?.day_history) day.$patch({ day_history: existing.day.day_history })
+      if (existing.day) day.$patch(existing.day)
+      if (existing.network) network.$patch(existing.network)
       game.company.player_email = email.trim().toLowerCase()
-      await saveState(pid, buildBundle(game, fleet, contracts, day))
+      await saveState(pid, buildBundle(game, fleet, contracts, day, network))
       return 'restored'
     } else {
       game.company.player_email = email.trim().toLowerCase()
-      await saveState(pid, buildBundle(game, fleet, contracts, day))
+      await saveState(pid, buildBundle(game, fleet, contracts, day, network))
       return 'linked'
     }
   } catch {

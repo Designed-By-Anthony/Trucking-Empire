@@ -2,7 +2,9 @@ import { useGameStore } from '~/stores/useGameStore'
 import { useFleetStore } from '~/stores/useFleetStore'
 import { useContractStore } from '~/stores/useContractStore'
 import { useDayStore } from '~/stores/useDayStore'
+import { useNetworkStore } from '~/stores/useNetworkStore'
 import { registerImmediateSave } from '~/composables/usePersistStatus'
+import { applyOfflineProgression } from '~/composables/useOfflineProgression'
 
 const UUID_KEY = 'fe:pid'
 const LS_KEY = 'fe:state'
@@ -17,7 +19,6 @@ function getUUID(): string {
   return id
 }
 
-// Derive a stable KV key: email if linked, else UUID
 function getPlayerId(game: ReturnType<typeof useGameStore>): string {
   const email = game.company.player_email?.trim()
   return email ? `email:${email.toLowerCase()}` : getUUID()
@@ -29,14 +30,21 @@ function timedFetch(url: string, opts?: RequestInit, ms = 6000): Promise<Respons
   return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t))
 }
 
-type SaveBundle = { game: any; fleet: any; contracts: any; day?: any }
+type SaveBundle = {
+  game: any
+  fleet: any
+  contracts: any
+  network: any
+  day: any
+  saved_at: number
+}
 
 async function loadState(pid: string): Promise<SaveBundle | null> {
   try {
     const res = await timedFetch(`/api/state?id=${encodeURIComponent(pid)}`)
     if (res.ok) {
       const data = await res.json()
-      if (data?.state?.game) return data.state
+      if (data?.state?.game) return data.state as SaveBundle
     }
   } catch {}
   try {
@@ -61,65 +69,114 @@ let saveScheduled = false
 let lastSave = 0
 const THROTTLE_MS = 8_000
 
-function buildBundle(game: ReturnType<typeof useGameStore>, fleet: ReturnType<typeof useFleetStore>, contracts: ReturnType<typeof useContractStore>, day: ReturnType<typeof useDayStore>): SaveBundle {
-  return { game: game.$state, fleet: fleet.$state, contracts: contracts.$state, day: { day_history: day.day_history } }
+function buildBundle(
+  game: ReturnType<typeof useGameStore>,
+  fleet: ReturnType<typeof useFleetStore>,
+  contracts: ReturnType<typeof useContractStore>,
+  day: ReturnType<typeof useDayStore>,
+  network: ReturnType<typeof useNetworkStore>,
+): SaveBundle {
+  return {
+    game: game.$state,
+    fleet: fleet.$state,
+    contracts: contracts.$state,
+    // Full day state — includes fleet_routes (active manifests), available_jobs, phase
+    day: day.$state,
+    // Dock freight, outbound staged, line haul market
+    network: network.$state,
+    saved_at: Date.now(),
+  }
 }
 
-function scheduleSave(game: ReturnType<typeof useGameStore>, fleet: ReturnType<typeof useFleetStore>, contracts: ReturnType<typeof useContractStore>, day: ReturnType<typeof useDayStore>) {
+function applyBundle(
+  bundle: SaveBundle,
+  game: ReturnType<typeof useGameStore>,
+  fleet: ReturnType<typeof useFleetStore>,
+  contracts: ReturnType<typeof useContractStore>,
+  day: ReturnType<typeof useDayStore>,
+  network: ReturnType<typeof useNetworkStore>,
+) {
+  if (bundle.game) game.$patch(bundle.game)
+  if (bundle.fleet) fleet.$patch(bundle.fleet)
+  if (bundle.contracts) contracts.$patch(bundle.contracts)
+  if (bundle.day) day.$patch(bundle.day)
+  if (bundle.network) network.$patch(bundle.network)
+}
+
+function scheduleSave(
+  game: ReturnType<typeof useGameStore>,
+  fleet: ReturnType<typeof useFleetStore>,
+  contracts: ReturnType<typeof useContractStore>,
+  day: ReturnType<typeof useDayStore>,
+  network: ReturnType<typeof useNetworkStore>,
+) {
   if (saveScheduled) return
   saveScheduled = true
   const delay = Math.max(0, THROTTLE_MS - (Date.now() - lastSave))
   setTimeout(() => {
     saveScheduled = false
     lastSave = Date.now()
-    saveState(getPlayerId(game), buildBundle(game, fleet, contracts, day))
+    saveState(getPlayerId(game), buildBundle(game, fleet, contracts, day, network))
   }, delay)
 }
 
-function wireSubscriptions(game: ReturnType<typeof useGameStore>, fleet: ReturnType<typeof useFleetStore>, contracts: ReturnType<typeof useContractStore>, day: ReturnType<typeof useDayStore>) {
-  game.$subscribe(() => scheduleSave(game, fleet, contracts, day), { detached: true })
-  fleet.$subscribe(() => scheduleSave(game, fleet, contracts, day), { detached: true })
-  contracts.$subscribe(() => scheduleSave(game, fleet, contracts, day), { detached: true })
-  day.$subscribe(() => scheduleSave(game, fleet, contracts, day), { detached: true })
+function wireSubscriptions(
+  game: ReturnType<typeof useGameStore>,
+  fleet: ReturnType<typeof useFleetStore>,
+  contracts: ReturnType<typeof useContractStore>,
+  day: ReturnType<typeof useDayStore>,
+  network: ReturnType<typeof useNetworkStore>,
+) {
+  const save = () => scheduleSave(game, fleet, contracts, day, network)
+  game.$subscribe(save, { detached: true })
+  fleet.$subscribe(save, { detached: true })
+  contracts.$subscribe(save, { detached: true })
+  day.$subscribe(save, { detached: true })
+  network.$subscribe(save, { detached: true })
+
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      saveState(getPlayerId(game), buildBundle(game, fleet, contracts, day))
+      saveState(getPlayerId(game), buildBundle(game, fleet, contracts, day, network))
     }
   })
 }
-
 
 export default defineNuxtPlugin(async () => {
   const game = useGameStore()
   const fleet = useFleetStore()
   const contracts = useContractStore()
   const day = useDayStore()
+  const network = useNetworkStore()
 
-  // If a reset was requested, skip hydration entirely
   if (sessionStorage.getItem(RESET_FLAG)) {
     sessionStorage.removeItem(RESET_FLAG)
-    wireSubscriptions(game, fleet, contracts, day)
-    registerImmediateSave(() => saveState(getPlayerId(game), buildBundle(game, fleet, contracts, day)))
+    wireSubscriptions(game, fleet, contracts, day, network)
+    registerImmediateSave(() => saveState(getPlayerId(game), buildBundle(game, fleet, contracts, day, network)))
     return
   }
 
-  // Normal path: hydrate from KV (email key if set, else UUID)
   const uuid = getUUID()
-  const saved = await loadState(uuid)
+  let saved = await loadState(uuid)
+
   if (saved) {
-    if (saved.game) game.$patch(saved.game)
-    if (saved.fleet) fleet.$patch(saved.fleet)
-    if (saved.contracts) contracts.$patch(saved.contracts)
-    if (saved.day?.day_history) day.$patch({ day_history: saved.day.day_history })
+    // Fast-forward game state by however much real time passed since last save
+    saved = applyOfflineProgression(saved) as SaveBundle
+    applyBundle(saved, game, fleet, contracts, day, network)
   }
 
-  // If the restored state has an email, re-save under the email key too
+  // If email is linked, also save under the email key and check for a cloud save
   const email = game.company.player_email?.trim().toLowerCase()
   if (email) {
-    saveState(`email:${email}`, buildBundle(game, fleet, contracts, day))
+    const emailPid = `email:${email}`
+    const emailSave = await loadState(emailPid)
+    if (emailSave) {
+      const advanced = applyOfflineProgression(emailSave) as SaveBundle
+      applyBundle(advanced, game, fleet, contracts, day, network)
+    }
+    saveState(emailPid, buildBundle(game, fleet, contracts, day, network))
   }
 
   fleet.validatePhantomRoutes(day.phase)
-  wireSubscriptions(game, fleet, contracts, day)
-  registerImmediateSave(() => saveState(getPlayerId(game), buildBundle(game, fleet, contracts, day)))
+  wireSubscriptions(game, fleet, contracts, day, network)
+  registerImmediateSave(() => saveState(getPlayerId(game), buildBundle(game, fleet, contracts, day, network)))
 })
