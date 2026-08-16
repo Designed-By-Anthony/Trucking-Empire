@@ -385,28 +385,48 @@
     <!-- Low dock warning + supplement purchase option -->
     <div
       v-if="networkStore.dock_available_count < 4"
-      class="rounded-xl px-4 py-3 flex items-center gap-3"
+      class="rounded-xl px-4 pt-3 pb-3 flex flex-col gap-2.5"
       style="background: rgba(255,251,235,0.9); border: 1px solid rgba(217,119,6,0.3);"
     >
-      <div class="flex-1">
+      <!-- Warning text -->
+      <div>
         <p class="text-xs font-bold" style="color: #d97706;">
           {{ networkStore.dock_available_count === 0 ? 'Dock empty' : 'Dock running low' }}
         </p>
         <p class="text-[10px] mt-0.5" style="color: #92400e;">
-          Buy spot freight from a broker to fill the dock, or run pickups and wait for your own line haul.
+          Buy spot freight from a load broker to fill the dock.
         </p>
       </div>
-      <button
-        @click="buySupplementFreight"
-        :disabled="gameStore.company.cash < SUPPLEMENT_COST"
-        class="flex-shrink-0 rounded-lg px-3 py-2 text-[11px] font-black transition-all active:scale-95"
-        :style="gameStore.company.cash >= SUPPLEMENT_COST
-          ? 'background: #d97706; color: white; box-shadow: 0 2px 8px rgba(217,119,6,0.3);'
-          : 'background: rgba(241,245,249,0.9); color: #94a3b8; border: 1px solid rgba(226,232,240,0.8);'"
-      >
-        Buy 8 Pallets<br>
-        <span class="text-[10px] font-semibold">${{ SUPPLEMENT_COST.toLocaleString() }}</span>
-      </button>
+      <!-- Quantity stepper + buy button -->
+      <div class="flex items-center gap-2">
+        <!-- Decrement -->
+        <button
+          @click="supplementCount = Math.max(1, supplementCount - 1)"
+          class="w-8 h-8 rounded-lg flex items-center justify-center text-base font-black flex-shrink-0 transition-all active:scale-90"
+          style="background: rgba(217,119,6,0.15); color: #d97706; border: 1px solid rgba(217,119,6,0.3);"
+        >−</button>
+        <!-- Count display -->
+        <div class="flex-1 text-center">
+          <span class="text-sm font-black" style="color: #92400e;">{{ supplementCount }}</span>
+          <span class="text-[11px] font-semibold ml-1" style="color: #b45309;">pallet{{ supplementCount !== 1 ? 's' : '' }}</span>
+        </div>
+        <!-- Increment -->
+        <button
+          @click="supplementCount = Math.min(40, supplementCount + 1)"
+          class="w-8 h-8 rounded-lg flex items-center justify-center text-base font-black flex-shrink-0 transition-all active:scale-90"
+          style="background: rgba(217,119,6,0.15); color: #d97706; border: 1px solid rgba(217,119,6,0.3);"
+        >+</button>
+        <!-- Buy button -->
+        <button
+          @click="buySupplementFreight"
+          :disabled="gameStore.company.cash < supplementCost"
+          class="flex-shrink-0 rounded-lg px-3 py-2 text-[11px] font-black transition-all active:scale-95 disabled:opacity-40"
+          style="background: #d97706; color: white; box-shadow: 0 2px 8px rgba(217,119,6,0.3);"
+        >
+          Buy<br>
+          <span class="text-[10px] font-semibold">${{ supplementCost.toLocaleString() }}</span>
+        </button>
+      </div>
     </div>
 
     <!-- Job Board Section -->
@@ -727,13 +747,17 @@ function optimizeAndFlash() {
 }
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
-const SUPPLEMENT_COST = 750   // $750 for 8 broker pallets (~$94/pallet)
+const SUPPLEMENT_COST_PER_PALLET = 94  // ~$94/pallet
+const supplementCount = ref(8)
+
+const supplementCost = computed(() => supplementCount.value * SUPPLEMENT_COST_PER_PALLET)
 
 function buySupplementFreight() {
+  const count = supplementCount.value
   const success = networkStore.purchaseFreightSupplement(
     gameStore.company.current_day,
-    8,
-    SUPPLEMENT_COST,
+    count,
+    supplementCost.value,
   )
   if (success) {
     const { deliveries } = networkStore.buildMorningBoard(gameStore.company.current_day)
