@@ -12,7 +12,7 @@
     >{{ totalWaiting }} waiting</span>
   </div>
 
-  <div class="modal-body p-4 flex flex-col gap-3" style="overflow-y: auto;">
+  <div class="modal-body p-4 space-y-3">
 
     <!-- ── Inbound: equipment locked ─────────────────────────────────────── -->
     <template v-if="networkStore.dock_incompatible.length > 0">

@@ -680,7 +680,12 @@ const routeSummaryLabel = computed(() => {
   const waveText = info.relays > 0
     ? ` · ${info.waves} Waves (${info.relays} Relay${info.relays !== 1 ? 's' : ''})`
     : ''
-  return `${info.stops} Stop${info.stops !== 1 ? 's' : ''}${waveText} · ~${info.estimated_hours.toFixed(1)}h shift`
+  // Use planRoute's actual computed return time so the shift estimate matches the per-stop ETAs.
+  // wave_info uses a fixed per-stop average that diverges from real weight-based service times.
+  const hours = routePlan.value
+    ? (routePlan.value.estimated_return_hour - (dayStore.departure_hour ?? 7))
+    : info.estimated_hours
+  return `${info.stops} Stop${info.stops !== 1 ? 's' : ''}${waveText} · ~${Math.max(0, hours).toFixed(1)}h shift`
 })
 
 const densityScore = computed(() => routePlan.value?.density_score ?? 0)
@@ -798,9 +803,12 @@ function launchAllRoutes() {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function fmtHour(h: number): string {
-  const hour = Math.floor(h) % 24
+  const totalMinutes = Math.round(h * 60)
+  const hour = Math.floor(totalMinutes / 60) % 24
+  const min = totalMinutes % 60
   const ampm = hour >= 12 ? 'PM' : 'AM'
-  return `${hour % 12 || 12}:00 ${ampm}`
+  const hh = hour % 12 || 12
+  return min === 0 ? `${hh}:00 ${ampm}` : `${hh}:${String(min).padStart(2, '0')} ${ampm}`
 }
 
 function tagStyle(tag: string): string {

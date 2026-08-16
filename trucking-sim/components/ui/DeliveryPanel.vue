@@ -199,9 +199,12 @@ const gameTimeFmt = computed(() => {
 })
 
 function fmtHour(h: number): string {
-  const hour = Math.floor(h) % 24
+  const totalMinutes = Math.round(h * 60)
+  const hour = Math.floor(totalMinutes / 60) % 24
+  const min = totalMinutes % 60
   const ampm = hour >= 12 ? 'PM' : 'AM'
-  return `${hour % 12 || 12}:00 ${ampm}`
+  const hh = hour % 12 || 12
+  return min === 0 ? `${hh}:00 ${ampm}` : `${hh}:${String(min).padStart(2, '0')} ${ampm}`
 }
 </script>
 

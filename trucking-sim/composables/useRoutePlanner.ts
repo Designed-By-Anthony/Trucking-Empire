@@ -1,5 +1,6 @@
 // composables/useRoutePlanner.ts
 import type { ManifestStop } from '~/types/game'
+import { serviceHoursForStop } from '~/composables/useServiceTime'
 
 export interface StopETA {
   job_id: string
@@ -21,8 +22,6 @@ export interface RoutePlan {
 const BASE_LAT = 43.1009
 const BASE_LNG = -75.2327
 const AVG_SPEED_MPH = 22
-const DEFAULT_SERVICE_H = 0.25   // hours per regular stop
-const TERMINAL_SERVICE_H = 0.5   // 30 min cross-dock at terminal
 const LAT_MILES = 69.0
 const LNG_MILES = 52.7           // at lat 43°N
 
@@ -33,7 +32,7 @@ function dist(lat1: number, lng1: number, lat2: number, lng2: number): number {
 }
 
 function serviceH(stop: ManifestStop): number {
-  return stop.stop_type === 'terminal_return' ? TERMINAL_SERVICE_H : DEFAULT_SERVICE_H
+  return serviceHoursForStop(stop)
 }
 
 export function useRoutePlanner() {
