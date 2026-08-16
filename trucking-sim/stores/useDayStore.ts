@@ -5,6 +5,7 @@ import { useNetworkStore } from '~/stores/useNetworkStore'
 import { useFleetStore } from '~/stores/useFleetStore'
 import { useRoutePlanner } from '~/composables/useRoutePlanner'
 import { checkJobCompatibility } from '~/composables/useEquipmentCheck'
+import { serviceHoursForStop } from '~/composables/useServiceTime'
 
 const BASE_LAT = 43.1009
 const BASE_LNG = -75.2327
@@ -76,11 +77,32 @@ export const useDayStore = defineStore('day', {
     manifest_volume_ft3(): number {
       return this.manifest.reduce((sum, s) => sum + s.job.volume_ft3, 0)
     },
+    // Heaviest single wave — what each trip actually loads. Used for capacity bars.
+    // Multi-wave routes split at terminal_return stops; total manifest weight is irrelevant
+    // to whether any single trip is within capacity.
+    max_wave_load(): { weight_lbs: number; volume_ft3: number } {
+      const manifest = this.manifest
+      if (manifest.length === 0) return { weight_lbs: 0, volume_ft3: 0 }
+      let maxW = 0, maxV = 0, waveW = 0, waveV = 0
+      for (const stop of manifest) {
+        if (stop.stop_type === 'terminal_return') {
+          maxW = Math.max(maxW, waveW)
+          maxV = Math.max(maxV, waveV)
+          waveW = 0; waveV = 0
+        } else {
+          waveW += stop.job.weight_lbs
+          waveV += stop.job.volume_ft3
+        }
+      }
+      maxW = Math.max(maxW, waveW)
+      maxV = Math.max(maxV, waveV)
+      return { weight_lbs: maxW, volume_ft3: maxV }
+    },
     weight_pct(): number {
-      return Math.min(100, (this.manifest_weight_lbs / this.truck_capacity_lbs) * 100)
+      return Math.min(100, (this.max_wave_load.weight_lbs / this.truck_capacity_lbs) * 100)
     },
     volume_pct(): number {
-      return Math.min(100, (this.manifest_volume_ft3 / this.truck_capacity_ft3) * 100)
+      return Math.min(100, (this.max_wave_load.volume_ft3 / this.truck_capacity_ft3) * 100)
     },
     is_over_capacity(): boolean {
       return this.wave_info.estimated_hours > MAX_SHIFT_HOURS
@@ -257,13 +279,13 @@ export const useDayStore = defineStore('day', {
       const LNG_MILES = 52.7
       const AVG_SPEED_MPH = 22
       const SERVICE_H = 0.25
-      const DEPARTURE_H = 7
+      const DEPARTURE_H = 6
 
       let capLbs = route.truck_capacity_lbs
       let capFt3 = route.truck_capacity_ft3
       if (targetId) {
         const truck = useFleetStore().getTruckById(targetId)
-        if (truck) { capLbs = truck.max_weight_lbs; capFt3 = truck.volume_ft3 }
+        if (truck) { capLbs = truck.max_weight_lbs ?? capLbs; capFt3 = truck.volume_ft3 ?? capFt3 }
       }
 
       function dist(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -331,7 +353,10 @@ export const useDayStore = defineStore('day', {
           : waveDeliveryLbs + chosen.job.weight_lbs > capLbs * RELAY_THRESHOLD ||
             waveDeliveryFt3 + chosen.job.volume_ft3 > capFt3 * RELAY_THRESHOLD
 
-        if (needsRelay && remaining.length > 0) {
+        // Guard: only relay if this wave already has stops to split off;
+        // if the wave is empty, adding over-threshold is unavoidable and skipping prevents infinite loop.
+        const waveHasContent = waveDeliveryFt3 > 0 || waveDeliveryLbs > 0 || pickupAccumFt3 > 0 || pickupAccumLbs > 0
+if (needsRelay && waveHasContent) {
           remaining.push(chosen)
           const dToTerminal = dist(lat, lng, BASE_LAT, BASE_LNG)
           ordered.push(makeTerminalReturn(currentLeg))
@@ -388,8 +413,8 @@ export const useDayStore = defineStore('day', {
 
       const truck = fleetStore.getTruckById(truckId)
       if (truck) {
-        route.truck_capacity_lbs = truck.max_weight_lbs
-        route.truck_capacity_ft3 = truck.volume_ft3
+        route.truck_capacity_lbs = truck.max_weight_lbs ?? route.truck_capacity_lbs
+        route.truck_capacity_ft3 = truck.volume_ft3 ?? route.truck_capacity_ft3
       }
 
       if (route.manifest.length > 0) {
@@ -418,8 +443,8 @@ export const useDayStore = defineStore('day', {
         route.departure_hour = gameStore.company.date_tick
         const truck = fleetStore.getTruckById(truckId)
         if (truck) {
-          route.truck_capacity_lbs = truck.max_weight_lbs
-          route.truck_capacity_ft3 = truck.volume_ft3
+          route.truck_capacity_lbs = truck.max_weight_lbs ?? route.truck_capacity_lbs
+          route.truck_capacity_ft3 = truck.volume_ft3 ?? route.truck_capacity_ft3
         }
         if (route.manifest.length > 0) {
           const plan = planRoute(route.manifest, route.departure_hour)
@@ -445,7 +470,7 @@ export const useDayStore = defineStore('day', {
       const stop = route.manifest[route.current_stop_index]
       if (!stop) return
       stop.job.status = 'delivered'
-      stop.on_time = gameHour <= stop.eta_game_hour + 0.25
+      stop.on_time = (gameHour % 24) <= stop.job.window_close
       route.current_stop_index++
       // Clear the dock item so it doesn't accumulate overnight
       if (stop.job.job_type === 'delivery') {
@@ -573,9 +598,29 @@ export const useDayStore = defineStore('day', {
           - expensePayroll - expenseStandby - totalFuelCost - expenseDemurrage - expenseCongestion,
       }
 
-      const spread = allLats.length > 1
-        ? Math.sqrt((Math.max(...allLats) - Math.min(...allLats)) ** 2 + (Math.max(...allLngs) - Math.min(...allLngs)) ** 2)
+      // On-time rate: single source of truth, capped at 100
+      const onTimeDelivered = source.reduce((n, route) =>
+        n + route.manifest.filter(s => s.stop_type !== 'terminal_return' && s.job.status === 'delivered' && s.on_time === true).length, 0)
+      const onTimeRate = totalDelivered > 0
+        ? Math.min(100, Math.round((onTimeDelivered / totalDelivered) * 100))
         : 0
+
+      // Convert degree spread to miles — guard against NaN from undefined coords
+      const validLats = allLats.filter(v => isFinite(v))
+      const validLngs = allLngs.filter(v => isFinite(v))
+      const spreadMi = validLats.length > 1 && validLngs.length > 1
+        ? Math.sqrt(
+            ((Math.max(...validLats) - Math.min(...validLats)) * 69.0) ** 2 +
+            ((Math.max(...validLngs) - Math.min(...validLngs)) * 52.7) ** 2
+          )
+        : 0
+
+      // Actual in-zone service hours from weight-based service times
+      let totalServiceHours = 0
+      for (const route of source) {
+        const deliveredStops = route.manifest.filter(s => s.stop_type !== 'terminal_return' && s.job.status === 'delivered')
+        totalServiceHours += deliveredStops.reduce((s, stop) => s + serviceHoursForStop(stop), 0)
+      }
 
       const result: DayResult = {
         day: dayNumber,
@@ -587,12 +632,13 @@ export const useDayStore = defineStore('day', {
         revenue: totalRevenue,
         late_penalties: totalLatePenalties,
         fuel_cost: totalFuelCost,
-        density_score: Math.max(0, Math.round(100 - spread * 2000)),
+        density_score: Math.max(0, Math.round(100 - (spreadMi / 12) * 100)),
+        on_time_rate: onTimeRate,
         // Stem = 15 min out + 15 min back + ~7 min between stops
         stem_time_hours: totalAttempted > 0
           ? Math.round((0.25 + 0.25 + Math.max(0, totalAttempted - 1) * 0.12) * 10) / 10
           : 0,
-        in_zone_hours: Math.round(totalDelivered * 0.4 * 10) / 10,
+        in_zone_hours: Math.round(totalServiceHours * 10) / 10,
         wave_count: totalWaves,
         relay_count: totalRelays,
         ledger,

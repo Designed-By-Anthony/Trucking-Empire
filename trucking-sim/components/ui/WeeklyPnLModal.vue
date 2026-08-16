@@ -177,6 +177,7 @@ function dayLabel(idx: number): string {
 }
 
 function dayNet(day: DayResult): number {
+  if (day.ledger) return day.ledger.net_profit
   return day.revenue - day.late_penalties - day.fuel_cost
 }
 
@@ -185,10 +186,15 @@ const weekRevenue = computed(() =>
 )
 
 const weekCosts = computed(() =>
-  dayHistory.value.reduce((s, d) => s + d.late_penalties + d.fuel_cost, 0)
+  dayHistory.value.reduce((s, d) => {
+    if (d.ledger) return s + d.ledger.expense_payroll + d.ledger.expense_standby + d.ledger.expense_fuel + d.ledger.expense_demurrage + d.ledger.expense_congestion
+    return s + d.late_penalties + d.fuel_cost
+  }, 0)
 )
 
-const weekNetProfit = computed(() => weekRevenue.value - weekCosts.value)
+const weekNetProfit = computed(() =>
+  dayHistory.value.reduce((s, d) => s + (d.ledger?.net_profit ?? d.revenue - d.late_penalties - d.fuel_cost), 0)
+)
 
 const weekTotalDelivered = computed(() =>
   dayHistory.value.reduce((s, d) => s + d.jobs_delivered, 0)
@@ -199,11 +205,16 @@ const weekTotalAttempted = computed(() =>
 )
 
 const weekOnTimePct = computed(() => {
-  const delivered = weekTotalDelivered.value
-  if (delivered === 0) return 0
-  // on_time rate isn't tracked per-day yet; approximate from late_penalties (each = 1 late)
-  const lateCount = dayHistory.value.reduce((s, d) => s + Math.round(d.late_penalties / 25), 0)
-  return Math.round(((delivered - lateCount) / delivered) * 100)
+  const days = dayHistory.value
+  if (days.length === 0) return 0
+  const totalDelivered = days.reduce((s, d) => s + d.jobs_delivered, 0)
+  if (totalDelivered === 0) return 0
+  // Weight each day's on_time_rate by its delivered count for accuracy
+  const onTimeTotal = days.reduce((s, d) => {
+    const rate = d.on_time_rate ?? Math.round(((d.jobs_delivered - Math.round(d.late_penalties / 25)) / Math.max(1, d.jobs_delivered)) * 100)
+    return s + rate * d.jobs_delivered
+  }, 0)
+  return Math.min(100, Math.round(onTimeTotal / totalDelivered))
 })
 
 const weekGrade = computed(() => {

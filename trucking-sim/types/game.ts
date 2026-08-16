@@ -276,6 +276,7 @@ export interface DayResult {
   late_penalties: number
   fuel_cost: number
   density_score: number
+  on_time_rate: number
   stem_time_hours: number
   in_zone_hours: number
   wave_count: number

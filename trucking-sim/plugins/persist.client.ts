@@ -136,7 +136,14 @@ function wireSubscriptions(
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      saveState(getPlayerId(game), buildBundle(game, fleet, contracts, day, network))
+      const bundle = buildBundle(game, fleet, contracts, day, network)
+      const pid = getPlayerId(game)
+      try { localStorage.setItem(LS_KEY, JSON.stringify(bundle)) } catch {}
+      // sendBeacon survives page suspension on iOS/Android; async fetch would be killed
+      const blob = new Blob([JSON.stringify({ id: pid, state: bundle })], { type: 'application/json' })
+      if (!navigator.sendBeacon('/api/state', blob)) {
+        saveState(pid, bundle)
+      }
     }
   })
 }
@@ -173,7 +180,7 @@ export default defineNuxtPlugin(async () => {
       const advanced = applyOfflineProgression(emailSave) as SaveBundle
       applyBundle(advanced, game, fleet, contracts, day, network)
     }
-    saveState(emailPid, buildBundle(game, fleet, contracts, day, network))
+    await saveState(emailPid, buildBundle(game, fleet, contracts, day, network))
   }
 
   fleet.validatePhantomRoutes(day.phase)

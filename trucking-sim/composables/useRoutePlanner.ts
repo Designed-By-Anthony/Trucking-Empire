@@ -61,7 +61,7 @@ export function useRoutePlanner() {
         job_id: stop.job.id,
         arrival_game_hour: arrival,
         departure_game_hour: arrival + svc,
-        is_on_time: arrival <= stop.job.window_close,
+        is_on_time: (arrival % 24) <= stop.job.window_close,
         drive_time_hours: driveH,
       })
       lat = stop.job.delivery_lat

@@ -144,8 +144,9 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useGameStore } from '~/stores/useGameStore'
+import { forceSaveNow } from '~/composables/usePersistStatus'
 import { syncByEmail } from '~/composables/useSyncEmail'
+import { useGameStore } from '~/stores/useGameStore'
 
 const gameStore = useGameStore()
 
@@ -170,9 +171,10 @@ async function doSync() {
   }
 }
 
-function unlinkEmail() {
+async function unlinkEmail() {
   gameStore.company.player_email = undefined
   syncMsg.value = null
+  await forceSaveNow()
 }
 
 const fmt = (n: number) =>

@@ -164,7 +164,7 @@
         <div class="flex items-center justify-between">
           <span class="text-[11px] font-semibold" style="color: #64748b;">Weight</span>
           <span class="text-[11px] font-bold tabular-nums" :style="{ color: dayStore.weight_pct > 85 ? '#dc2626' : '#0f172a' }">
-            {{ dayStore.manifest_weight_lbs.toLocaleString() }} / {{ dayStore.capacity_lbs.toLocaleString() }} lbs
+            {{ dayStore.max_wave_load.weight_lbs.toLocaleString() }} / {{ dayStore.capacity_lbs.toLocaleString() }} lbs
           </span>
         </div>
         <div class="h-1.5 rounded-full overflow-hidden" style="background: rgba(226,232,240,0.8);">
@@ -183,7 +183,7 @@
         <div class="flex items-center justify-between">
           <span class="text-[11px] font-semibold" style="color: #64748b;">Volume</span>
           <span class="text-[11px] font-bold tabular-nums" :style="{ color: dayStore.volume_pct > 85 ? '#dc2626' : '#0f172a' }">
-            {{ dayStore.manifest_volume_ft3.toFixed(1) }} / {{ dayStore.capacity_ft3 }} ft³
+            {{ dayStore.max_wave_load.volume_ft3.toFixed(1) }} / {{ dayStore.capacity_ft3 }} ft³
           </span>
         </div>
         <div class="h-1.5 rounded-full overflow-hidden" style="background: rgba(226,232,240,0.8);">

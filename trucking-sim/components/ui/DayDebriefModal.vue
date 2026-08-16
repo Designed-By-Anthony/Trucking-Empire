@@ -226,7 +226,7 @@
         <div class="h-2 rounded-full overflow-hidden" style="background: rgba(226,232,240,0.8);">
           <div
             class="h-full rounded-full transition-all"
-            :style="`width: ${onTimePct}%; background: ${onTimeColor};`"
+            :style="`width: ${Math.min(100, onTimePct)}%; background: ${onTimeColor};`"
           />
         </div>
       </div>
@@ -497,15 +497,7 @@ const isWeekEnd = computed(() => {
   return d >= 0 && d % 5 === 4
 })
 
-const onTimeCount = computed(() =>
-  dayStore.manifest.filter(s => s.on_time === true).length,
-)
-
-const onTimePct = computed(() => {
-  const delivered = result.value?.jobs_delivered ?? 0
-  if (delivered === 0) return 0
-  return Math.round((onTimeCount.value / delivered) * 100)
-})
+const onTimePct = computed(() => result.value?.on_time_rate ?? 0)
 
 const onTimeColor = computed(() => {
   if (onTimePct.value >= 90) return '#059669'

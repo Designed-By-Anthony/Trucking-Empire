@@ -396,7 +396,7 @@ watch(() => gameStore.company.date_tick, (tick) => {
     if (stop && stop.job.status !== 'delivered') {
       if (tick >= stop.eta_game_hour + serviceHours(stop)) {
         if (stop.job.brand_id) brandContractStore.recordDelivery(stop.job.brand_id)
-        dayStore.completeStop(stop.eta_game_hour, truckId)
+        dayStore.completeStop(tick, truckId)
       }
       continue
     }

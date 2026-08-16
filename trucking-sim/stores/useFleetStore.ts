@@ -314,6 +314,12 @@ export const useFleetStore = defineStore('fleet', {
           truck.status = 'Idle'
           truck.driver_id = null
         }
+        // Heal persisted trucks that predate the volume_ft3 field (schema migration)
+        if (truck.volume_ft3 == null || isNaN(truck.volume_ft3 as number)) {
+          // Default by truck type — Box Truck / Van = 280 ft³, larger trucks get more
+          const defaults: Record<string, number> = { 'Box Truck': 280, 'Day Cab': 450, 'Semi': 1800, 'Flatbed': 1400, 'Reefer': 1600 }
+          truck.volume_ft3 = defaults[truck.truck_type] ?? 280
+        }
       }
       for (const driver of this.drivers) {
         if (driver.status === 'Driving') {
