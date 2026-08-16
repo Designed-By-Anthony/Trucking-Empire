@@ -114,6 +114,7 @@ export interface Company {
   reputation: number             // 0–100
   total_revenue: number
   total_expenses: number
+  player_email?: string          // if set, KV key is email-derived for cross-device sync
 }
 
 export interface ExpenseEntry {

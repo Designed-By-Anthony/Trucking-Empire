@@ -536,11 +536,12 @@ export const useNetworkStore = defineStore('network', {
 
     // Purchase a supplemental freight batch from a load broker when dock is low.
     // Returns false if insufficient cash.
-    purchaseFreightSupplement(dayNumber: number, count: number, cost: number): boolean {
+    purchaseFreightSupplement(dayNumber: number, count: number, cost: number, purchaseIndex = 0): boolean {
       const gameStore = useGameStore()
       if (gameStore.company.cash < cost) return false
       gameStore.deductCash(cost, 'overhead')
-      const jobs = generateDeliveryJobs(dayNumber * 7919 + count, count)
+      // Unique seed per purchase so repeat buys generate different jobs
+      const jobs = generateDeliveryJobs(dayNumber * 7919 + count + purchaseIndex * 1301, count)
       for (const job of jobs) {
         this.dock.push({
           id: `df-sup-d${dayNumber}-${job.id}`,

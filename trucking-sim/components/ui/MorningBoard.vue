@@ -559,6 +559,7 @@ import { useFleetStore } from '~/stores/useFleetStore'
 import { useGameStore } from '~/stores/useGameStore'
 import { useNetworkStore } from '~/stores/useNetworkStore'
 import { useRoutePlanner } from '~/composables/useRoutePlanner'
+import { checkJobCompatibility } from '~/composables/useEquipmentCheck'
 import type { Job } from '~/types/game'
 
 // ─── Stores ──────────────────────────────────────────────────────────────────
@@ -728,19 +729,26 @@ function optimizeAndFlash() {
 // ─── Actions ─────────────────────────────────────────────────────────────────
 const SUPPLEMENT_COST = 750   // $750 for 8 broker pallets (~$94/pallet)
 
+let _supplementBuyCount = 0
 function buySupplementFreight() {
+  // Use a unique purchase counter in the seed so each purchase generates different jobs
+  const purchaseSeed = _supplementBuyCount++
   const success = networkStore.purchaseFreightSupplement(
     gameStore.company.current_day,
     8,
     SUPPLEMENT_COST,
+    purchaseSeed,
   )
   if (success) {
-    // Rebuild available jobs from updated dock
     const { deliveries } = networkStore.buildMorningBoard(gameStore.company.current_day)
-    // Merge new deliveries into available jobs (don't duplicate ones already there)
     const existingIds = new Set(dayStore.available_jobs.map(j => j.id))
     const fresh = deliveries.filter(j => !existingIds.has(j.id))
-    dayStore.available_jobs.push(...fresh)
+    // Apply same equipment compatibility filter as startPlanningPhase
+    const trucks = fleetStore.trucks
+    const compatible = trucks.length === 0
+      ? fresh
+      : fresh.filter(j => trucks.some(t => checkJobCompatibility(j, t).ok))
+    dayStore.available_jobs.push(...compatible)
   }
 }
 
