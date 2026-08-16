@@ -146,10 +146,13 @@
       </Transition>
     </Teleport>
 
-    <!-- Floating pill tab bar — bottom center -->
-    <div class="absolute bottom-5 left-0 right-0 z-50 flex justify-center px-4 pointer-events-none">
+    <!-- Floating pill tab bar — bottom center, clear of home indicator + Safari chrome -->
+    <div
+      class="absolute left-0 right-0 z-50 flex justify-center px-4 pointer-events-none"
+      style="bottom: max(16px, env(safe-area-inset-bottom, 16px));"
+    >
       <nav
-        class="pointer-events-auto flex items-center gap-1 p-1.5 rounded-full"
+        class="pointer-events-auto flex items-center gap-0.5 p-1.5 rounded-full"
         style="
           background: rgba(255, 255, 255, 0.95);
           backdrop-filter: blur(20px) saturate(180%);
@@ -161,29 +164,31 @@
           v-for="tab in tabs"
           :key="tab.id"
           @click="activeTab = activeTab === tab.id ? null : tab.id"
-          class="relative flex flex-col items-center gap-0.5 px-4 py-2 rounded-full transition-all duration-200"
+          class="relative flex flex-col items-center gap-0.5 py-1.5 rounded-full transition-all duration-200"
+          :class="activeTab === tab.id ? 'px-3' : 'px-2.5'"
           :style="activeTab === tab.id
             ? 'background: #2563eb; color: white;'
             : 'color: #94a3b8;'"
         >
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
             <path :d="tab.icon" />
           </svg>
-          <span class="text-[10px] font-semibold tracking-wide" style="line-height: 1;">{{ tab.label }}</span>
+          <!-- Label only on active tab -->
+          <span v-if="activeTab === tab.id" class="text-[10px] font-semibold tracking-wide whitespace-nowrap" style="line-height: 1;">{{ tab.label }}</span>
           <!-- Unread dot for dispatch -->
           <span
             v-if="tab.id === 'dispatch' && contractStore.available.length > 0 && activeTab !== 'dispatch'"
-            class="absolute top-1.5 right-2.5 w-1.5 h-1.5 rounded-full bg-blue-400"
+            class="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-400"
           />
           <!-- Planning dot for route tab -->
           <span
             v-if="tab.id === 'route' && dayStore.phase === 'planning' && activeTab !== 'route'"
-            class="absolute top-1.5 right-2.5 w-1.5 h-1.5 rounded-full bg-green-400"
+            class="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-green-400"
           />
           <!-- Outbound freight dot for brokers tab -->
           <span
             v-if="tab.id === 'brokers' && (networkStore.outbound_pending.length > 0 || networkStore.dock_incompatible_count > 0) && activeTab !== 'brokers'"
-            class="absolute top-1.5 right-2.5 w-1.5 h-1.5 rounded-full bg-amber-400"
+            class="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-amber-400"
           />
         </button>
       </nav>
@@ -228,11 +233,6 @@ const showDebrief = ref(false)
 const showWeekSummary = ref(false)
 
 const tabs = [
-  {
-    id: 'map',
-    label: 'Map',
-    icon: 'M3 6l9-3 9 3v3l-9 3-9-3V6zM3 12l9 3 9-3M3 18l9 3 9-3',
-  },
   {
     id: 'route',
     label: 'Route',
