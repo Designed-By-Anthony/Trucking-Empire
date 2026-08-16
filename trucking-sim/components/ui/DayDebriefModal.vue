@@ -351,7 +351,7 @@
       class="w-full text-sm font-bold text-white rounded-xl py-3.5 transition-all active:scale-95"
       style="background: #2563eb;"
     >
-      Start New Day
+      Start Next Shift ({{ nextDayName }} 6:00 AM)
       <svg class="inline-block ml-1.5 -mt-0.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <line x1="5" y1="12" x2="19" y2="12"/>
         <polyline points="12 5 19 12 12 19"/>
@@ -529,6 +529,13 @@ const formattedDate = computed(() => {
   const tick = result.value?.date_tick_start ?? gameStore.company.date_tick
   const dayOfWeek = Math.floor(tick / 24) % 7
   return days[dayOfWeek]
+})
+
+const nextDayName = computed(() => {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  const tick = result.value?.date_tick_start ?? gameStore.company.date_tick
+  const dayOfWeek = Math.floor(tick / 24) % 7
+  return days[(dayOfWeek + 1) % 7]
 })
 
 const summaryStats = computed(() => [

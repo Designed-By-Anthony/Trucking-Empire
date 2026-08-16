@@ -272,9 +272,13 @@ export const useGameLoop = () => {
     // 4. Overhead costs
     processOverhead(hoursElapsed)
 
-    // 5. Day advancement — new day every 24 game hours
+    // 5. Day advancement — only fires outside an active shift or debrief.
+    // During in_progress/debrief, handleStartNewDay (triggered by the player
+    // clicking "Start Next Shift") is the sole path that advances current_day.
     const newDay = Math.floor(gameStore.company.date_tick / 24)
-    if (newDay > gameStore.company.current_day) {
+    if (newDay > gameStore.company.current_day
+      && dayStore.phase !== 'in_progress'
+      && dayStore.phase !== 'debrief') {
       gameStore.advanceDay()
       contractStore.pruneOldContracts()
     }

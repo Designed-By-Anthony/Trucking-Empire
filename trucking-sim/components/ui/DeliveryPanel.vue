@@ -33,10 +33,10 @@
         <span class="text-[10px] font-black uppercase tracking-widest" :style="isDriving ? 'color: #2563eb;' : 'color: #059669;'">
           {{ isDriving
             ? (currentStop.job.job_type === 'pickup' ? 'Heading to Pickup' : 'En Route')
-            : (currentStop.job.job_type === 'pickup' ? 'Loading' : 'Delivering') }}
+            : (currentStop.job.job_type === 'pickup' ? 'Loading' : 'Unloading Freight') }}
         </span>
         <span class="ml-auto text-[10px] font-bold" style="color: #64748b;">
-          {{ isDriving ? `ETA ${fmtHour(currentStop.eta_game_hour)}` : `Done ~${fmtHour(completionTick)}` }}
+          {{ isDriving ? `ETA ${fmtHour(currentStop.eta_game_hour)}` : `${dwellRemainingMin}m remaining` }}
         </span>
       </div>
 
@@ -146,7 +146,7 @@
 import { computed } from 'vue'
 import { useDayStore } from '~/stores/useDayStore'
 import { useGameStore } from '~/stores/useGameStore'
-import { serviceHoursForJob as serviceHours } from '~/composables/useServiceTime'
+import { serviceHoursForStop } from '~/composables/useServiceTime'
 
 const dayStore = useDayStore()
 const gameStore = useGameStore()
@@ -154,7 +154,7 @@ const gameStore = useGameStore()
 const currentTick = computed(() => gameStore.company.date_tick)
 const currentStop = computed(() => dayStore.manifest[dayStore.current_stop_index] ?? null)
 const completionTick = computed(() =>
-  currentStop.value ? currentStop.value.eta_game_hour + serviceHours(currentStop.value.job) : 0
+  currentStop.value ? currentStop.value.eta_game_hour + serviceHoursForStop(currentStop.value) : 0
 )
 
 // En route vs at-stop state
@@ -162,20 +162,28 @@ const isDriving = computed(() =>
   currentStop.value ? currentTick.value < currentStop.value.eta_game_hour : false
 )
 
+// Minutes remaining in the current stop dwell (0 when driving)
+const dwellRemainingMin = computed(() => {
+  if (!currentStop.value || isDriving.value) return 0
+  const remaining = completionTick.value - currentTick.value
+  return Math.max(0, Math.ceil(remaining * 60))
+})
+
 // Progress bar 0–100 for current leg
 const stopProgress = computed(() => {
   if (!currentStop.value) return 100
   const idx = dayStore.current_stop_index
 
   if (isDriving.value) {
+    const prevStop = dayStore.manifest[idx - 1]
     const prevTick = idx === 0
       ? dayStore.departure_hour
-      : (dayStore.manifest[idx - 1]?.eta_game_hour ?? dayStore.departure_hour) + serviceHours(dayStore.manifest[idx - 1]!.job)
+      : (prevStop?.eta_game_hour ?? dayStore.departure_hour) + (prevStop ? serviceHoursForStop(prevStop) : 0)
     const total = currentStop.value.eta_game_hour - prevTick
     if (total <= 0) return 100
     return Math.max(0, Math.min(100, ((currentTick.value - prevTick) / total) * 100))
   } else {
-    const total = serviceHours(currentStop.value.job)
+    const total = serviceHoursForStop(currentStop.value)
     return Math.max(0, Math.min(100, ((currentTick.value - currentStop.value.eta_game_hour) / total) * 100))
   }
 })

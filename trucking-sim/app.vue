@@ -327,6 +327,7 @@ function handleStartNewDay() {
   showDebrief.value = false
   gameStore.advanceDay()
   gameStore.snapToMorning()
+  gameStore.setClockSpeed(1)  // Resume clock after overnight transition
 
   // Full overnight transition — strict sequential order:
 
@@ -433,6 +434,8 @@ watch(() => gameStore.company.date_tick, (tick) => {
       gameStore.completeOnboarding()
     }
 
+    // Pause clock — player must click "Start Next Shift" to advance the day
+    gameStore.setClockSpeed(0)
     showDebrief.value = true
     activeTab.value = null
   }
