@@ -290,6 +290,8 @@ export const useNetworkStore = defineStore('network', {
     // Today's spot-market line-haul carrier options
     line_haul_market: [] as LineHaulOption[],
     initialized: false,
+    // Globally incrementing supplement purchase counter — unique seed per buy
+    supplement_purchase_count: 0,
   }),
 
   getters: {
@@ -536,12 +538,13 @@ export const useNetworkStore = defineStore('network', {
 
     // Purchase a supplemental freight batch from a load broker when dock is low.
     // Returns false if insufficient cash.
-    purchaseFreightSupplement(dayNumber: number, count: number, cost: number, purchaseIndex = 0): boolean {
+    purchaseFreightSupplement(dayNumber: number, count: number, cost: number): boolean {
       const gameStore = useGameStore()
       if (gameStore.company.cash < cost) return false
       gameStore.deductCash(cost, 'overhead')
-      // Unique seed per purchase so repeat buys generate different jobs
-      const jobs = generateDeliveryJobs(dayNumber * 7919 + count + purchaseIndex * 1301, count)
+      // Globally unique seed: counter never resets so repeat buys always differ
+      this.supplement_purchase_count++
+      const jobs = generateDeliveryJobs(dayNumber * 7919 + this.supplement_purchase_count * 1301 + count, count)
       for (const job of jobs) {
         this.dock.push({
           id: `df-sup-d${dayNumber}-${job.id}`,

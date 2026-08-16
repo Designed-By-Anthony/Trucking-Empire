@@ -87,7 +87,7 @@
         </div>
 
         <!-- Action buttons: always visible -->
-        <div class="flex gap-2 px-4 pb-3">
+        <div class="flex gap-2 px-4 pb-4">
           <!-- Broker Out: primary action, fee shown inline -->
           <button
             @click="doBrokerOut(freight.id)"

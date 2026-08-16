@@ -22,6 +22,47 @@
       >{{ gameStore.formattedCash }}</p>
     </div>
 
+    <!-- Save & Sync — email-based cross-device progress -->
+    <div class="rounded-xl overflow-hidden" style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);">
+      <p class="text-[10px] font-bold uppercase tracking-widest px-4 py-2.5" style="color: #64748b; border-bottom: 1px solid rgba(226,232,240,0.8);">Save &amp; Sync</p>
+      <div class="px-4 py-3 flex flex-col gap-2.5">
+        <!-- Already linked -->
+        <div v-if="gameStore.company.player_email" class="flex items-center gap-2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <span class="text-[11px] font-semibold flex-1 truncate" style="color: #059669;">{{ gameStore.company.player_email }}</span>
+          <button
+            @click="unlinkEmail"
+            class="text-[10px] font-bold rounded px-2 py-0.5"
+            style="color: #94a3b8; background: rgba(241,245,249,0.9); border: 1px solid rgba(226,232,240,0.8);"
+          >Unlink</button>
+        </div>
+        <!-- Email input -->
+        <template v-else>
+          <p class="text-[11px] leading-relaxed" style="color: #64748b;">Enter your email to sync progress across web &amp; PWA. Same email on any device restores your save.</p>
+          <input
+            v-model="emailInput"
+            type="email"
+            placeholder="your@email.com"
+            class="w-full rounded-lg px-3 py-2 text-sm outline-none"
+            style="background: white; border: 1px solid rgba(226,232,240,0.8); color: #0f172a;"
+            @keydown.enter="doSync"
+          />
+          <button
+            @click="doSync"
+            :disabled="!emailInput.includes('@') || syncing"
+            class="w-full rounded-lg py-2.5 text-sm font-black text-white transition-all active:scale-95 disabled:opacity-50"
+            style="background: linear-gradient(135deg, #2563eb, #7c3aed);"
+          >{{ syncing ? 'Connecting…' : 'Link / Restore Save' }}</button>
+          <!-- Result feedback -->
+          <p v-if="syncMsg" class="text-[11px] font-semibold text-center" :style="syncMsg.type === 'error' ? 'color: #dc2626;' : 'color: #059669;'">
+            {{ syncMsg.text }}
+          </p>
+        </template>
+      </div>
+    </div>
+
     <!-- Stats 2×2 grid -->
     <div class="grid grid-cols-2 gap-2.5">
       <div class="rounded-xl p-3.5" style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);">
@@ -85,47 +126,6 @@
     <div v-if="gameStore.recentRevenue.length === 0" class="text-center py-6">
       <div class="text-3xl mb-2 opacity-20">📊</div>
       <p class="text-xs" style="color: #94a3b8;">Complete a delivery to see revenue</p>
-    </div>
-
-    <!-- Save & Sync — email-based cross-device progress -->
-    <div class="rounded-xl overflow-hidden" style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);">
-      <p class="text-[10px] font-bold uppercase tracking-widest px-4 py-2.5" style="color: #64748b; border-bottom: 1px solid rgba(226,232,240,0.8);">Save &amp; Sync</p>
-      <div class="px-4 py-3 flex flex-col gap-2.5">
-        <!-- Already linked -->
-        <div v-if="gameStore.company.player_email" class="flex items-center gap-2">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-          <span class="text-[11px] font-semibold flex-1 truncate" style="color: #059669;">{{ gameStore.company.player_email }}</span>
-          <button
-            @click="unlinkEmail"
-            class="text-[10px] font-bold rounded px-2 py-0.5"
-            style="color: #94a3b8; background: rgba(241,245,249,0.9); border: 1px solid rgba(226,232,240,0.8);"
-          >Unlink</button>
-        </div>
-        <!-- Email input -->
-        <template v-else>
-          <p class="text-[11px] leading-relaxed" style="color: #64748b;">Enter your email to sync progress across web &amp; PWA. Same email on any device restores your save.</p>
-          <input
-            v-model="emailInput"
-            type="email"
-            placeholder="your@email.com"
-            class="w-full rounded-lg px-3 py-2 text-sm outline-none"
-            style="background: white; border: 1px solid rgba(226,232,240,0.8); color: #0f172a;"
-            @keydown.enter="doSync"
-          />
-          <button
-            @click="doSync"
-            :disabled="!emailInput.includes('@') || syncing"
-            class="w-full rounded-lg py-2.5 text-sm font-black text-white transition-all active:scale-95 disabled:opacity-50"
-            style="background: linear-gradient(135deg, #2563eb, #7c3aed);"
-          >{{ syncing ? 'Connecting…' : 'Link / Restore Save' }}</button>
-          <!-- Result feedback -->
-          <p v-if="syncMsg" class="text-[11px] font-semibold text-center" :style="syncMsg.type === 'error' ? 'color: #dc2626;' : 'color: #059669;'">
-            {{ syncMsg.text }}
-          </p>
-        </template>
-      </div>
     </div>
 
     <!-- Dev reset — wipes all state and restarts onboarding -->

@@ -729,15 +729,11 @@ function optimizeAndFlash() {
 // ─── Actions ─────────────────────────────────────────────────────────────────
 const SUPPLEMENT_COST = 750   // $750 for 8 broker pallets (~$94/pallet)
 
-let _supplementBuyCount = 0
 function buySupplementFreight() {
-  // Use a unique purchase counter in the seed so each purchase generates different jobs
-  const purchaseSeed = _supplementBuyCount++
   const success = networkStore.purchaseFreightSupplement(
     gameStore.company.current_day,
     8,
     SUPPLEMENT_COST,
-    purchaseSeed,
   )
   if (success) {
     const { deliveries } = networkStore.buildMorningBoard(gameStore.company.current_day)
