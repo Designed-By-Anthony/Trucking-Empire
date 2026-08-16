@@ -253,6 +253,17 @@ export interface ManifestStop {
   leg?: number  // which route leg (increments after each terminal_return)
 }
 
+export interface DailyLedger {
+  revenue_pd: number            // P&D delivery payout (net of late penalties)
+  revenue_pickups: number       // Pickup job payouts
+  expense_payroll: number       // Hired driver daily wages (for routes that ran)
+  expense_standby: number       // $50/day per hired driver with no route today
+  expense_fuel: number          // Fuel at $4.20/gal based on route miles
+  expense_demurrage: number     // Outbound dock items sitting >3 days
+  expense_congestion: number    // $200/day dock congestion penalty
+  net_profit: number            // All revenues minus all expenses
+}
+
 export interface DayResult {
   day: number
   date_tick_start: number
@@ -268,6 +279,7 @@ export interface DayResult {
   in_zone_hours: number
   wave_count: number
   relay_count: number
+  ledger?: DailyLedger
 }
 
 export interface DispatchEvent {

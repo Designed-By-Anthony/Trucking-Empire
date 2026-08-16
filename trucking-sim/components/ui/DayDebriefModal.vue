@@ -65,6 +65,81 @@
       </div>
     </div>
 
+    <!-- Daily Ledger (shown when ledger data is present) -->
+    <div v-if="result?.ledger" class="rounded-xl overflow-hidden" style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);">
+      <p class="text-[10px] font-bold uppercase tracking-widest px-4 py-2.5" style="color: #64748b; border-bottom: 1px solid rgba(226,232,240,0.8);">Daily Ledger</p>
+      <div class="px-4 py-3 flex flex-col gap-1.5">
+        <!-- Revenue -->
+        <div class="flex items-center justify-between">
+          <span class="text-[11px]" style="color: #64748b;">P&D Deliveries</span>
+          <span class="text-[11px] font-semibold tabular-nums" style="color: #059669;">+${{ result.ledger.revenue_pd.toLocaleString() }}</span>
+        </div>
+        <div v-if="result.ledger.revenue_pickups > 0" class="flex items-center justify-between">
+          <span class="text-[11px]" style="color: #64748b;">Pickup Revenue</span>
+          <span class="text-[11px] font-semibold tabular-nums" style="color: #059669;">+${{ result.ledger.revenue_pickups.toLocaleString() }}</span>
+        </div>
+        <!-- Divider -->
+        <div class="my-1" style="border-top: 1px dashed rgba(226,232,240,0.8);"></div>
+        <!-- Expenses -->
+        <div v-if="result.ledger.expense_payroll > 0" class="flex items-center justify-between">
+          <span class="text-[11px]" style="color: #64748b;">Driver Payroll</span>
+          <span class="text-[11px] font-semibold tabular-nums" style="color: #dc2626;">−${{ result.ledger.expense_payroll.toLocaleString() }}</span>
+        </div>
+        <div v-if="result.ledger.expense_standby > 0" class="flex items-center justify-between">
+          <span class="text-[11px]" style="color: #64748b;">Standby Fees</span>
+          <span class="text-[11px] font-semibold tabular-nums" style="color: #dc2626;">−${{ result.ledger.expense_standby.toLocaleString() }}</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-[11px]" style="color: #64748b;">Fuel</span>
+          <span class="text-[11px] font-semibold tabular-nums" style="color: #dc2626;">−${{ result.ledger.expense_fuel.toLocaleString() }}</span>
+        </div>
+        <div v-if="result.ledger.expense_demurrage > 0" class="flex items-center justify-between">
+          <span class="text-[11px]" style="color: #64748b;">Dock Demurrage</span>
+          <span class="text-[11px] font-semibold tabular-nums" style="color: #dc2626;">−${{ result.ledger.expense_demurrage.toLocaleString() }}</span>
+        </div>
+        <div v-if="result.ledger.expense_congestion > 0" class="flex items-center justify-between">
+          <span class="text-[11px] font-bold" style="color: #dc2626;">Dock Congestion Penalty</span>
+          <span class="text-[11px] font-bold tabular-nums" style="color: #dc2626;">−${{ result.ledger.expense_congestion.toLocaleString() }}</span>
+        </div>
+        <!-- Net -->
+        <div class="flex items-center justify-between pt-1.5 mt-0.5" style="border-top: 1px solid rgba(226,232,240,0.6);">
+          <span class="text-[11px] font-black" style="color: #0f172a;">Net Profit</span>
+          <span class="text-[11px] font-black tabular-nums" :style="result.ledger.net_profit >= 0 ? 'color: #059669;' : 'color: #dc2626;'">
+            {{ result.ledger.net_profit >= 0 ? '+' : '' }}${{ result.ledger.net_profit.toLocaleString() }}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Week-to-date running tally (shown when 2+ days have completed) -->
+    <div
+      v-if="dayStore.day_history.length > 1"
+      class="rounded-xl px-4 py-3"
+      style="background: rgba(239,246,255,0.9); border: 1px solid rgba(147,197,253,0.5);"
+    >
+      <p class="text-[10px] font-bold uppercase tracking-widest mb-2.5" style="color: #2563eb;">
+        Week {{ weekNumber }} — Running Total ({{ dayStore.day_history.length }} of 5 days)
+      </p>
+      <div class="flex items-center justify-between gap-4">
+        <div class="text-center flex-1">
+          <p class="text-base font-black tabular-nums" style="color: #059669;">+${{ weekRevenueSoFar.toLocaleString() }}</p>
+          <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: #64748b;">Revenue</p>
+        </div>
+        <div class="w-px self-stretch" style="background: rgba(147,197,253,0.4);"></div>
+        <div class="text-center flex-1">
+          <p class="text-base font-black tabular-nums" style="color: #dc2626;">−${{ weekCostsSoFar.toLocaleString() }}</p>
+          <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: #64748b;">Costs</p>
+        </div>
+        <div class="w-px self-stretch" style="background: rgba(147,197,253,0.4);"></div>
+        <div class="text-center flex-1">
+          <p class="text-base font-black tabular-nums" :style="weekNetSoFar >= 0 ? 'color: #059669;' : 'color: #dc2626;'">
+            {{ weekNetSoFar >= 0 ? '+' : '' }}${{ weekNetSoFar.toLocaleString() }}
+          </p>
+          <p class="text-[10px] font-semibold uppercase tracking-wider mt-0.5" style="color: #64748b;">Net</p>
+        </div>
+      </div>
+    </div>
+
     <!-- Wave breakdown (only show if more than 1 wave ran) -->
     <div
       v-if="(result?.wave_count ?? 1) > 1 || (result?.relay_count ?? 0) > 0"
@@ -257,6 +332,19 @@
 
   <!-- Footer: start new day / view week summary -->
   <div class="flex-shrink-0 px-4 pb-5 pt-3" style="border-top: 1px solid rgba(226,232,240,0.8);">
+    <!-- Save status -->
+    <div v-if="saveStatus === 'saving' || saveStatus === 'saved'" class="flex items-center justify-center gap-1.5 mb-2.5">
+      <svg v-if="saveStatus === 'saving'" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin">
+        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+      </svg>
+      <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>
+      <span class="text-[10px] font-semibold" :style="saveStatus === 'saved' ? 'color: #059669;' : 'color: #94a3b8;'">
+        {{ saveStatus === 'saving' ? 'Saving…' : 'All saved' }}
+      </span>
+    </div>
+
     <button
       v-if="!isWeekEnd"
       @click="emit('start-new-day')"
@@ -275,7 +363,7 @@
       class="w-full text-sm font-bold text-white rounded-xl py-3.5 transition-all active:scale-95"
       style="background: linear-gradient(135deg, #7c3aed, #2563eb);"
     >
-      View Week 1 Summary
+      View Week {{ weekNumber }} Summary
       <svg class="inline-block ml-1.5 -mt-0.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M3 3v18h18"/><polyline points="18 9 22 5 18 1"/><polyline points="22 5 22 19 8 19"/>
       </svg>
@@ -284,11 +372,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useDayStore } from '~/stores/useDayStore'
 import { useGameStore } from '~/stores/useGameStore'
 import { useFleetStore } from '~/stores/useFleetStore'
 import { useBrandContractStore } from '~/stores/useBrandContractStore'
+import { persistSaveStatus, forceSaveNow } from '~/composables/usePersistStatus'
 import type { ManifestStop } from '~/types/game'
 
 const emit = defineEmits<{
@@ -300,6 +389,10 @@ const dayStore = useDayStore()
 const gameStore = useGameStore()
 const fleetStore = useFleetStore()
 const brandStore = useBrandContractStore()
+
+const saveStatus = persistSaveStatus
+
+onMounted(() => { forceSaveNow() })
 
 const result = computed(() => dayStore.day_result)
 
@@ -372,6 +465,24 @@ const truckSummaries = computed(() => {
   })
 })
 
+// Week-to-date running tally
+const weekNumber = computed(() => Math.floor((result.value?.day ?? 0) / 5) + 1)
+
+const weekRevenueSoFar = computed(() =>
+  dayStore.day_history.reduce((s, d) => s + d.revenue, 0)
+)
+
+const weekCostsSoFar = computed(() =>
+  dayStore.day_history.reduce((s, d) => {
+    const ledgerCosts = d.ledger
+      ? d.ledger.expense_payroll + d.ledger.expense_standby + d.ledger.expense_fuel + d.ledger.expense_demurrage + d.ledger.expense_congestion
+      : d.late_penalties + d.fuel_cost
+    return s + ledgerCosts
+  }, 0)
+)
+
+const weekNetSoFar = computed(() => weekRevenueSoFar.value - weekCostsSoFar.value)
+
 const stopsPerWaveLabel = computed(() => {
   if (!result.value) return '—'
   const waves = result.value.wave_count || 1
@@ -379,8 +490,12 @@ const stopsPerWaveLabel = computed(() => {
   return stops === 0 ? '0' : `~${Math.round(stops / waves)}`
 })
 
-// Days are 0-indexed; day 4 = the 5th working day = end of Week 1
-const isWeekEnd = computed(() => (result.value?.day ?? -1) >= 4)
+// Days are 0-indexed; day 4 = the 5th working day = end of Week 1.
+// Only show the week summary once, exactly at day 4 — not on every subsequent day.
+const isWeekEnd = computed(() => {
+  const d = result.value?.day ?? -1
+  return d >= 0 && d % 5 === 4
+})
 
 const onTimeCount = computed(() =>
   dayStore.manifest.filter(s => s.on_time === true).length,

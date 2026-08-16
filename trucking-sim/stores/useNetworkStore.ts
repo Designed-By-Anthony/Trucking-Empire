@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import type { Job, DockFreight, DockFreightSource, FreightDest, FreightDestType, LineHaulOption, StagedOutbound } from '~/types/game'
 import { useGameStore } from '~/stores/useGameStore'
+import { useFleetStore } from '~/stores/useFleetStore'
+import { checkJobCompatibility } from '~/composables/useEquipmentCheck'
 
 // ─── Terminal config ───────────────────────────────────────────────────────
 
@@ -273,6 +275,10 @@ function generateScheduledPickups(seed: number, count: number): Job[] {
 const DEMURRAGE_GRACE_DAYS = 3
 const DEMURRAGE_DAILY_RATE = 30
 
+// Physical dock capacity hard-cap
+const DOCK_MAX_VOLUME_FT3 = 2500
+const CONGESTION_DAILY_PENALTY = 200
+
 // ─── Store ─────────────────────────────────────────────────────────────────
 
 export const useNetworkStore = defineStore('network', {
@@ -295,6 +301,39 @@ export const useNetworkStore = defineStore('network', {
 
     dock_available_count(): number {
       return this.dock.filter(f => f.status === 'available').length
+    },
+
+    dock_volume_ft3(): number {
+      return this.dock
+        .filter(f => f.status === 'available' || f.status === 'on_manifest')
+        .reduce((sum, f) => sum + (f.job.volume_ft3 ?? 0), 0)
+    },
+
+    dock_max_volume_ft3(): number {
+      return DOCK_MAX_VOLUME_FT3
+    },
+
+    dock_is_congested(): boolean {
+      return this.dock_volume_ft3 >= DOCK_MAX_VOLUME_FT3
+    },
+
+    // Inbound dock items that no owned truck can accept (wrong equipment)
+    dock_incompatible(): DockFreight[] {
+      const fleetStore = useFleetStore()
+      return this.dock.filter(f => {
+        if (f.status !== 'available') return false
+        return !fleetStore.trucks.some(t => checkJobCompatibility(f.job, t).ok)
+      })
+    },
+
+    dock_incompatible_count(): number {
+      return this.dock_incompatible.length
+    },
+
+    // Count of inbound items expiring at the next overnight refresh (3 days old today)
+    dock_expiring_count(): (currentDay: number) => number {
+      return (currentDay: number) =>
+        this.dock.filter(f => f.status === 'available' && currentDay - f.day_arrived === 3).length
     },
 
     // Outbound freight waiting for the player to assign a carrier
@@ -340,6 +379,12 @@ export const useNetworkStore = defineStore('network', {
     consumeDelivery(jobId: string) {
       const item = this.dock.find(f => f.job.id === jobId)
       if (item) item.status = 'on_manifest'
+    },
+
+    // Mark a dock item as delivered so it clears at the next refresh
+    markDelivered(jobId: string) {
+      const item = this.dock.find(f => f.job.id === jobId)
+      if (item) item.status = 'delivered'
     },
 
     // Return freight to available if player removes it from manifest
@@ -459,6 +504,36 @@ export const useNetworkStore = defineStore('network', {
       }
     },
 
+    // Read-only demurrage total for the daily ledger preview (does not deduct).
+    computeDemurrageTotal(currentDay: number): number {
+      let total = 0
+      for (const freight of this.outbound_staged) {
+        if (freight.status !== 'dock_pending') continue
+        if (currentDay - freight.day_staged > DEMURRAGE_GRACE_DAYS) total += DEMURRAGE_DAILY_RATE
+      }
+      return total
+    },
+
+    // Apply the $200/day congestion penalty and return the amount charged (0 if not congested).
+    applyCongestionPenalty(): number {
+      if (!this.dock_is_congested) return 0
+      const gameStore = useGameStore()
+      gameStore.deductCash(CONGESTION_DAILY_PENALTY, 'overhead')
+      return CONGESTION_DAILY_PENALTY
+    },
+
+    // Broker out an inbound dock item the player can't deliver (wrong equipment).
+    // Credits 65% of the job payout as a pass-through fee — better than letting it expire.
+    brokerInboundFreight(dockItemId: string): number {
+      const gameStore = useGameStore()
+      const item = this.dock.find(f => f.id === dockItemId && f.status === 'available')
+      if (!item) return 0
+      const credit = Math.ceil(item.job.payout * 0.65)
+      gameStore.addCash(credit, 'delivery')
+      item.status = 'delivered'   // clears at next refresh
+      return credit
+    },
+
     // Purchase a supplemental freight batch from a load broker when dock is low.
     // Returns false if insufficient cash.
     purchaseFreightSupplement(dayNumber: number, count: number, cost: number): boolean {
@@ -482,10 +557,33 @@ export const useNetworkStore = defineStore('network', {
     // Purge delivered dock items and seed fresh overnight arrivals.
     // Called at the top of each new day before building the morning board.
     refreshDailyFreight(dayNumber: number) {
-      this.dock = this.dock.filter(f => f.status !== 'delivered')
+      // Reset any on_manifest orphans from the previous day back to available so they
+      // re-enter the job board. Items not delivered during a route end up here when a
+      // driver runs out of HOS or the day ends before all stops are completed.
+      for (const item of this.dock) {
+        if (item.status === 'on_manifest') {
+          item.status = 'available'
+          item.job.status = 'pending'
+        }
+      }
+      // Remove delivered items and items that have sat 4+ days (returned to shipper)
+      this.dock = this.dock.filter(f => {
+        if (f.status === 'delivered') return false
+        if (f.status === 'available' && dayNumber - f.day_arrived >= 4) return false
+        return true
+      })
+      // Also evict outbound items that sat 7+ days without a carrier
+      this.outbound_staged = this.outbound_staged.filter(o => {
+        if (o.status !== 'dock_pending') return true
+        return dayNumber - o.day_staged < 7
+      })
+      // Block overnight arrivals when dock is at physical capacity
+      if (this.dock_is_congested) return
       const count = 8 + (dayNumber % 5)  // 8–12 items, varies by day
       const jobs = generateDeliveryJobs(dayNumber * 7331 + 1009, count)
       for (const job of jobs) {
+        // Stop adding once we hit the cap
+        if (this.dock_volume_ft3 + (job.volume_ft3 ?? 0) > DOCK_MAX_VOLUME_FT3) break
         this.dock.push({
           id: `df-d${dayNumber}-${job.id}`,
           job: { ...job, id: `arr-d${dayNumber}-${job.id}` },

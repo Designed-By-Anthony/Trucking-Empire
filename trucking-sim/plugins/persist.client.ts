@@ -2,6 +2,7 @@ import { useGameStore } from '~/stores/useGameStore'
 import { useFleetStore } from '~/stores/useFleetStore'
 import { useContractStore } from '~/stores/useContractStore'
 import { useDayStore } from '~/stores/useDayStore'
+import { registerImmediateSave } from '~/composables/usePersistStatus'
 
 const PID_KEY = 'fe:pid'
 const LS_KEY = 'fe:state'
@@ -107,4 +108,9 @@ export default defineNuxtPlugin(async () => {
   fleet.validatePhantomRoutes(day.phase)
 
   wireSubscriptions(pid, game, fleet, contracts, day)
+
+  // Register an unthrottled save for end-of-day checkpoints
+  registerImmediateSave(() =>
+    saveState(pid, { game: game.$state, fleet: fleet.$state, contracts: contracts.$state, day: { day_history: day.day_history } })
+  )
 })

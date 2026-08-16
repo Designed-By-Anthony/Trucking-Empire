@@ -79,16 +79,31 @@ export const useBrandContractStore = defineStore('brand_contracts', {
       })
     },
 
-    // Settle SLA bonus every 5 days. Call from handleStartNewDay.
+    // Settle SLA bonus or penalty every 5 days. Call from handleStartNewDay.
     settleWeek(currentDay: number) {
       const gameStore = useGameStore()
       for (const c of this.contracts) {
         if (!c.active) continue
         const daysElapsed = currentDay - c.week_start_day
         if (daysElapsed < 5) continue
+
         if (c.weekly_volume_delivered >= c.weekly_volume_target) {
+          // SLA met — pay retainer bonus
           gameStore.addCash(c.weekly_retainer, `brand-sla-${c.id}`)
+        } else {
+          // SLA missed — proportional penalty + reputation hit
+          const missRatio = c.weekly_volume_delivered / Math.max(1, c.weekly_volume_target)
+          const penalty = Math.round(c.weekly_retainer * 0.5 * (1 - missRatio))
+          if (penalty > 0) {
+            gameStore.deductCash(penalty, `brand-penalty-${c.id}`)
+          }
+          gameStore.adjustReputation(-3)
+          // Severe miss (<50% of target): deactivate the contract
+          if (missRatio < 0.5) {
+            this.deactivateContract(c.id)
+          }
         }
+
         c.weekly_volume_delivered = 0
         c.week_start_day = currentDay
       }

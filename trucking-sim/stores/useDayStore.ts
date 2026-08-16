@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Job, ManifestStop, DayResult, DispatchEvent, DayPhase, FleetRoute } from '~/types/game'
+import type { Job, ManifestStop, DayResult, DailyLedger, DispatchEvent, DayPhase, FleetRoute } from '~/types/game'
 import { useGameStore } from '~/stores/useGameStore'
 import { useNetworkStore } from '~/stores/useNetworkStore'
 import { useFleetStore } from '~/stores/useFleetStore'
@@ -447,6 +447,10 @@ export const useDayStore = defineStore('day', {
       stop.job.status = 'delivered'
       stop.on_time = gameHour <= stop.eta_game_hour + 0.25
       route.current_stop_index++
+      // Clear the dock item so it doesn't accumulate overnight
+      if (stop.job.job_type === 'delivery') {
+        useNetworkStore().markDelivered(stop.job.id)
+      }
     },
 
     // Settle a single route and mark it complete (called by app.vue per-truck loop).
@@ -463,10 +467,26 @@ export const useDayStore = defineStore('day', {
       route.route_revenue = revenue
       route.route_late_penalties = latePenalties
       route.route_fuel_cost = fuelCost
+      // Restore undelivered stops back to available on the dock so they re-enter
+      // the job board the next morning (driver ran out of HOS or day ended early)
+      const networkStore = useNetworkStore()
+      const undelivered = route.manifest.filter(
+        s => s.stop_type !== 'terminal_return' && s.job.status !== 'delivered'
+      )
+      for (const s of undelivered) {
+        s.job.status = 'pending'
+        networkStore.restoreDelivery(s.job.id)
+      }
+
       route.route_phase = 'complete'
       const fleetStore = useFleetStore()
       fleetStore.setTruckPhase0Status(truckId, 'Idle')
-      if (route.driver_id) fleetStore.updateDriverHOS(route.driver_id, { status: 'Available' })
+      if (route.driver_id) {
+        // Clear assignment so the driver re-enters the available pool for hub-to-hub contracts
+        fleetStore.updateDriverHOS(route.driver_id, { status: 'Available', assigned_truck_id: null })
+        const truck = fleetStore.getTruckById(truckId)
+        if (truck) truck.driver_id = null
+      }
     },
 
     // Aggregate all routes and produce the DayResult. Call when all_routes_complete === true.
@@ -503,7 +523,55 @@ export const useDayStore = defineStore('day', {
       }
 
       const gameStore = useGameStore()
+      const fleetStore = useFleetStore()
+      const networkStore = useNetworkStore()
       gameStore.deductCash(totalFuelCost, 'fuel')
+
+      // ── Daily ledger ──────────────────────────────────────────────────────
+      // Split revenue by job type
+      let revenuePD = 0, revenuePickups = 0
+      for (const route of source) {
+        const delivered = route.manifest.filter(s => s.stop_type !== 'terminal_return' && s.job.status === 'delivered')
+        const latePenaltyCount = delivered.filter(s => s.on_time === false).length
+        for (const s of delivered) {
+          if (!s.job.job_type || s.job.job_type === 'delivery') revenuePD += s.job.payout
+          else revenuePickups += s.job.payout
+        }
+        revenuePD -= latePenaltyCount * 25
+      }
+
+      // Payroll: settleDriverPayroll (called in handleStartNewDay) charges ALL hired drivers
+      // their daily_wage regardless of whether they ran. We report it here for the ledger
+      // without double-deducting — those deductions happen in settleDriverPayroll and per-tick wages.
+      const activeDriverIds = new Set(
+        Object.values(this.fleet_routes)
+          .filter(r => r.route_phase !== 'pending')
+          .map(r => r.driver_id)
+          .filter(Boolean) as string[]
+      )
+      const hiredDrivers = fleetStore.drivers.filter(d => !d.is_owner_op && d.daily_wage > 0)
+      // Active drivers already paid per-tick; idle drivers cost their daily guaranteed rate
+      const expensePayroll = hiredDrivers
+        .filter(d => activeDriverIds.has(d.id))
+        .reduce((sum, d) => sum + d.daily_wage, 0)
+      const idleHired = hiredDrivers.filter(d => !activeDriverIds.has(d.id))
+      // $50/day standby minimum for idle hired drivers (charged here; settleDriverPayroll charges full wage)
+      const expenseStandby = idleHired.reduce((sum, d) => sum + d.daily_wage, 0)
+
+      const expenseDemurrage = networkStore.computeDemurrageTotal(dayNumber)
+      const expenseCongestion = networkStore.applyCongestionPenalty()
+
+      const ledger: DailyLedger = {
+        revenue_pd: Math.max(0, revenuePD),
+        revenue_pickups: revenuePickups,
+        expense_payroll: expensePayroll,
+        expense_standby: expenseStandby,
+        expense_fuel: totalFuelCost,
+        expense_demurrage: expenseDemurrage,
+        expense_congestion: expenseCongestion,
+        net_profit: Math.max(0, revenuePD) + revenuePickups
+          - expensePayroll - expenseStandby - totalFuelCost - expenseDemurrage - expenseCongestion,
+      }
 
       const spread = allLats.length > 1
         ? Math.sqrt((Math.max(...allLats) - Math.min(...allLats)) ** 2 + (Math.max(...allLngs) - Math.min(...allLngs)) ** 2)
@@ -520,10 +588,14 @@ export const useDayStore = defineStore('day', {
         late_penalties: totalLatePenalties,
         fuel_cost: totalFuelCost,
         density_score: Math.max(0, Math.round(100 - spread * 2000)),
-        stem_time_hours: 0.5,
-        in_zone_hours: totalDelivered * 0.4,
+        // Stem = 15 min out + 15 min back + ~7 min between stops
+        stem_time_hours: totalAttempted > 0
+          ? Math.round((0.25 + 0.25 + Math.max(0, totalAttempted - 1) * 0.12) * 10) / 10
+          : 0,
+        in_zone_hours: Math.round(totalDelivered * 0.4 * 10) / 10,
         wave_count: totalWaves,
         relay_count: totalRelays,
+        ledger,
       }
       this.day_result = result
       this.day_history.push(result)
@@ -546,13 +618,20 @@ export const useDayStore = defineStore('day', {
       route.manifest.push({ job: event.job, sequence: route.manifest.length + 1, eta_game_hour: baseEta, on_time: null })
       this._resequenceRoute(route)
 
-      const remaining = route.manifest.slice(route.current_stop_index)
-      if (remaining.length > 0) {
-        const plan = planRoute(remaining, gameStore.company.date_tick)
-        plan.stops.forEach((eta, i) => {
-          const stop = route.manifest[route.current_stop_index + i]
-          if (stop) stop.eta_game_hour = eta.arrival_game_hour
-        })
+      // Recalculate ETAs only for stops AFTER the current in-progress stop.
+      // Overwriting the current stop's ETA would reset it to a future value and
+      // break the tick handler's completion condition, freezing the truck in LOADING.
+      const postCurrent = route.manifest.slice(route.current_stop_index + 1)
+      if (postCurrent.length > 0) {
+        const { updateETAs } = useRoutePlanner()
+        const currentStop = route.manifest[route.current_stop_index]
+        const fromLat = currentStop?.job.delivery_lat ?? BASE_LAT
+        const fromLng = currentStop?.job.delivery_lng ?? BASE_LNG
+        const svcH = currentStop?.stop_type === 'terminal_return' ? 0.5 : 0.25
+        const fromHour = currentStop
+          ? currentStop.eta_game_hour + svcH
+          : gameStore.company.date_tick
+        updateETAs(postCurrent, fromLat, fromLng, fromHour)
       }
 
       this.active_event = null

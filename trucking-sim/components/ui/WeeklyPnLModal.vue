@@ -5,7 +5,7 @@
     style="border-bottom: 1px solid rgba(226,232,240,0.8);"
   >
     <div>
-      <h2 class="text-base font-bold" style="color: #0f172a;">Week 1 P&L Report</h2>
+      <h2 class="text-base font-bold" style="color: #0f172a;">Week {{ currentWeekNumber }} P&L Report</h2>
       <p class="text-xs mt-0.5" style="color: #94a3b8;">5-Day Performance Summary</p>
     </div>
     <div
@@ -25,7 +25,7 @@
         : 'background: rgba(254,242,242,0.9); border: 1px solid rgba(239,68,68,0.3);'"
     >
       <p class="text-xs font-semibold uppercase tracking-widest mb-1" :style="weekNetProfit >= 0 ? 'color:#059669;' : 'color:#dc2626;'">
-        Week 1 Net Profit
+        Week {{ currentWeekNumber }} Net Profit
       </p>
       <p
         class="text-3xl font-black tabular-nums leading-none"
@@ -141,7 +141,7 @@
       class="w-full text-sm font-bold text-white rounded-xl py-3.5 transition-all active:scale-95"
       style="background: linear-gradient(135deg, #7c3aed, #2563eb);"
     >
-      Advance to Week 2
+      Advance to Week {{ currentWeekNumber + 1 }}
       <svg class="inline-block ml-1.5 -mt-0.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <line x1="5" y1="12" x2="19" y2="12"/>
         <polyline points="12 5 19 12 12 19"/>
@@ -162,6 +162,12 @@ const dayStore = useDayStore()
 const gameStore = useGameStore()
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+
+// Week number derived from the last completed day in history, or current_day
+const currentWeekNumber = computed(() => {
+  const lastDay = dayStore.day_history.at(-1)?.day ?? gameStore.company.current_day
+  return Math.floor(lastDay / 5) + 1
+})
 
 const dayHistory = computed(() => dayStore.day_history)
 const missingDays = computed(() => Math.max(0, 5 - dayHistory.value.length))

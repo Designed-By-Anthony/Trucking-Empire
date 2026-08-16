@@ -336,22 +336,49 @@
       </div>
     </div>
 
+    <!-- Dock congestion warning -->
+    <div
+      v-if="networkStore.dock_is_congested"
+      class="rounded-xl px-4 py-3 flex items-start gap-3"
+      style="background: rgba(254,226,226,0.9); border: 1px solid rgba(239,68,68,0.4);"
+    >
+      <svg class="w-4 h-4 flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      <div class="flex-1">
+        <p class="text-xs font-black" style="color: #dc2626;">DOCK CONGESTED</p>
+        <p class="text-[10px] mt-0.5 leading-relaxed" style="color: #991b1b;">
+          {{ Math.round(networkStore.dock_volume_ft3) }}/{{ networkStore.dock_max_volume_ft3 }} ft³ — Clear floor space via fleet dispatch or line-haul broker. $200/day penalty applies.
+        </p>
+      </div>
+    </div>
+
     <!-- Dock status row -->
-    <div class="rounded-xl px-4 py-3 flex items-center gap-3"
-         style="background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);">
-      <svg class="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <div
+      class="rounded-xl px-4 py-3 flex items-center gap-3"
+      :style="networkStore.dock_is_congested
+        ? 'background: rgba(254,242,242,0.9); border: 1px solid rgba(239,68,68,0.3);'
+        : 'background: rgba(248,250,252,0.9); border: 1px solid rgba(226,232,240,0.8);'"
+    >
+      <svg class="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" :stroke="networkStore.dock_is_congested ? '#dc2626' : '#64748b'" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
         <rect x="1" y="3" width="22" height="18" rx="2"/>
         <path d="M1 9h22M8 3v18M16 3v18"/>
       </svg>
       <div class="flex-1">
-        <p class="text-[10px] font-bold uppercase tracking-widest" style="color: #94a3b8;">Terminal Dock</p>
+        <p class="text-[10px] font-bold uppercase tracking-widest" :style="networkStore.dock_is_congested ? 'color: #dc2626;' : 'color: #94a3b8;'">Terminal Dock</p>
         <p class="text-xs font-semibold mt-0.5" style="color: #0f172a;">
-          {{ networkStore.dock_available_count }} freight items staged
+          {{ networkStore.dock_available_count }} inbound · {{ Math.round(networkStore.dock_volume_ft3) }}/{{ networkStore.dock_max_volume_ft3 }} ft³
         </p>
-      </div>
-      <div class="flex-shrink-0 text-right" v-if="networkStore.outbound_count > 0">
-        <p class="text-[10px] font-bold uppercase tracking-widest" style="color: #94a3b8;">Outbound</p>
-        <p class="text-xs font-bold" style="color: #d97706;">{{ networkStore.outbound_count }} staged</p>
+        <p v-if="networkStore.dock_incompatible_count > 0" class="text-[10px] mt-0.5 font-semibold" style="color: #7c3aed;">
+          {{ networkStore.dock_incompatible_count }} need liftgate/dock access — broker out in Brokers tab
+        </p>
+        <p v-if="networkStore.outbound_count > 0" class="text-[10px] mt-0.5 font-semibold" style="color: #d97706;">
+          {{ networkStore.outbound_count }} outbound staged — assign carrier in Brokers tab
+        </p>
+        <p v-if="expiringCount > 0" class="text-[10px] mt-0.5 font-semibold" style="color: #ea580c;">
+          ⚠ {{ expiringCount }} item{{ expiringCount === 1 ? '' : 's' }} expire tonight — dispatch before end of day
+        </p>
       </div>
     </div>
 
@@ -636,6 +663,10 @@ const routeSummaryLabel = computed(() => {
 })
 
 const densityScore = computed(() => routePlan.value?.density_score ?? 0)
+
+const expiringCount = computed(() =>
+  networkStore.dock_expiring_count(gameStore.company.current_day)
+)
 
 const densityColor = computed(() => {
   const s = densityScore.value

@@ -180,6 +180,11 @@
             v-if="tab.id === 'route' && dayStore.phase === 'planning' && activeTab !== 'route'"
             class="absolute top-1.5 right-2.5 w-1.5 h-1.5 rounded-full bg-green-400"
           />
+          <!-- Outbound freight dot for brokers tab -->
+          <span
+            v-if="tab.id === 'brokers' && (networkStore.outbound_pending.length > 0 || networkStore.dock_incompatible_count > 0) && activeTab !== 'brokers'"
+            class="absolute top-1.5 right-2.5 w-1.5 h-1.5 rounded-full bg-amber-400"
+          />
         </button>
       </nav>
     </div>
@@ -205,6 +210,7 @@ import DayDebriefModal from '~/components/ui/DayDebriefModal.vue'
 import WeeklyPnLModal from '~/components/ui/WeeklyPnLModal.vue'
 import OnboardingWizard from '~/components/ui/OnboardingWizard.vue'
 import BrandContractsPanel from '~/components/ui/BrandContractsPanel.vue'
+import FreightBrokersPanel from '~/components/ui/FreightBrokersPanel.vue'
 import { serviceHoursForStop } from '~/composables/useServiceTime'
 import { useBrandContractStore } from '~/stores/useBrandContractStore'
 
@@ -243,6 +249,11 @@ const tabs = [
     icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01',
   },
   {
+    id: 'brokers',
+    label: 'Brokers',
+    icon: 'M20 7H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2zM16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16',
+  },
+  {
     id: 'fleet',
     label: 'Fleet',
     icon: 'M1 17h14V8H1v9zM15 17h7v-6l-2-4h-5v10zM4.5 17a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM18.5 17a1.5 1.5 0 100 3 1.5 1.5 0 000-3z',
@@ -260,6 +271,7 @@ const activeComponent = computed(() => ({
   route: dayStore.phase === 'in_progress' ? DeliveryPanel : MorningBoard,
   dispatch: DispatchPanel,
   brands: BrandContractsPanel,
+  brokers: FreightBrokersPanel,
   fleet: FleetPanel,
   financials: FinancialsPanel,
 }[activeTab.value ?? ''] ?? null))
@@ -303,8 +315,13 @@ function handleStartNewDay() {
     }
   }
 
-  // 1b. Settle hired-driver payroll and brand contract SLA bonuses for the day just ended
-  fleetStore.settleDriverPayroll()
+  // 1b. Settle hired-driver payroll — only idle drivers; active ones paid per-tick
+  const activeDriverIds = new Set(
+    Object.values(dayStore.fleet_routes)
+      .filter(r => r.route_phase !== 'pending')
+      .flatMap(r => r.driver_id ? [r.driver_id] : [])
+  )
+  fleetStore.settleDriverPayroll(activeDriverIds)
   brandContractStore.settleWeek(gameStore.company.current_day)
 
   // 2. Demurrage — charge for outbound freight sitting past grace period

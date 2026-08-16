@@ -3,6 +3,7 @@ import type { Truck, Driver, LicenseClass, HireableDriver } from '~/types/game'
 import { INITIAL_TRUCKS, INITIAL_DRIVERS } from '~/data/terminals'
 import type { VehicleListing } from '~/data/vehicles'
 import { useGameStore } from '~/stores/useGameStore'
+import { useDayStore } from '~/stores/useDayStore'
 
 const LICENSE_RANK: Record<LicenseClass, number> = { CLASS_C: 0, CLASS_B: 1, CLASS_A: 2 }
 
@@ -251,7 +252,11 @@ export const useFleetStore = defineStore('fleet', {
       truck.route_geometry = null
       truck.route_distance_miles = 0
 
-      if (driver) driver.status = 'Available'
+      if (driver) {
+        driver.status = 'Available'
+        driver.assigned_truck_id = null
+      }
+      truck.driver_id = null
     },
 
     forceDriverOffDuty(driverId: string) {
@@ -329,6 +334,12 @@ export const useFleetStore = defineStore('fleet', {
         driver.status = 'Available'
         driver.assigned_truck_id = null
       }
+      // Cancel the fleet route so it doesn't block debrief
+      const dayStore = useDayStore()
+      const route = dayStore.fleet_routes[truckId]
+      if (route && route.route_phase === 'in_progress') {
+        route.route_phase = 'complete'
+      }
     },
 
     // Refresh the hire marketplace for a new day. Call from handleStartNewDay in app.vue.
@@ -363,12 +374,16 @@ export const useFleetStore = defineStore('fleet', {
       return true
     },
 
-    // Deduct flat daily wages for all non-owner-op drivers. Call at start of each new day.
-    settleDriverPayroll(): number {
+    // Deduct guaranteed daily pay for hired drivers who had NO route today.
+    // Active drivers already pay wages per-tick (wage_per_hr × hours_worked);
+    // charging daily_wage on top would double-bill them.
+    // Pass the set of driver IDs that ran routes so idle ones get their standby rate.
+    settleDriverPayroll(activeDriverIds: Set<string> = new Set()): number {
       const gameStore = useGameStore()
       let total = 0
       for (const driver of this.drivers) {
         if (driver.is_owner_op || !driver.daily_wage) continue
+        if (activeDriverIds.has(driver.id)) continue  // already paid per-tick
         total += driver.daily_wage
       }
       if (total > 0) gameStore.deductCash(total, 'wages')
