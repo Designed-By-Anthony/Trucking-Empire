@@ -5,7 +5,7 @@
     <span class="text-xs font-medium" style="color: #94a3b8;">{{ gameStore.formattedTime }}</span>
   </div>
 
-  <div class="modal-body p-4 flex flex-col gap-4">
+  <div class="modal-body p-4 space-y-4">
 
     <!-- Cash hero -->
     <div
